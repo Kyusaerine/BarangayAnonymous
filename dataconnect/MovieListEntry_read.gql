@@ -1,0 +1,31 @@
+
+# This is a file for you to write an un-named query.
+# Only one un-named query is allowed per file.
+query {
+  movieListEntrys{
+    movieList {
+      user {
+        displayName
+        createdAt
+        email
+        photoUrl
+      }
+      name
+      isPublic
+      createdAt
+      updatedAt
+      description
+      shareToken
+    }
+    movie {
+      title
+      year
+      createdAt
+      summary
+      genres
+      runtime
+    }
+    position
+    note
+  }
+}

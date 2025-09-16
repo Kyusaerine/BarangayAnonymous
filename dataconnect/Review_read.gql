@@ -1,0 +1,38 @@
+
+# This is a file for you to write an un-named query.
+# Only one un-named query is allowed per file.
+query {
+  reviews{
+    user {
+      displayName
+      createdAt
+      email
+      photoUrl
+    }
+    watch {
+      user {
+        displayName
+        createdAt
+        email
+        photoUrl
+      }
+      movie {
+        title
+        year
+        createdAt
+        summary
+        genres
+        runtime
+      }
+      createdAt
+      watchDate
+      location
+    }
+    rating
+    createdAt
+    updatedAt
+    isPublic
+    reviewText
+    shareToken
+  }
+}

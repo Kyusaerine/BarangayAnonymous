@@ -1,0 +1,7 @@
+# This is a file for you to write an un-named mutation. 
+# Only one un-named mutation is allowed per file.
+mutation {
+  movieListEntry_insert(
+    data: {id: "11111111222233334444555555555555", movieId: "11111111222233334444555555555555", movieListId: "11111111222233334444555555555555", note: "", position: 0}
+  )
+}

@@ -1,0 +1,17 @@
+@import "tailwindcss";
+
+@theme {
+  --color-primary: #1c5e47;      /* Primary Green */
+  --color-secondary: #FAFAFA;    /* Snowy White */
+  --color-text: #333333;         /* Mild Black */
+  --color-primary-hover: #256F27;/* Hover Green */
+
+  /* optional accent colors */
+  --color-accent: #0057A0;
+  --color-warning: #F6B500;
+  --color-danger: #C62828;
+}
+
+/* base tweaks */
+:root { color-scheme: light; }
+html, body, #root { height: 100%; }
