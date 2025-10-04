@@ -24,6 +24,7 @@ export default function App() {
       <Route path="/dashboard/newreport" element={<NewReport />} />
       <Route path="/dashboard/profile" element={<Profile />} />
       <Route path="/dashboard/reportfeed" element={<Reportfeed />} />
+      <Route path="/reportfeed" element={<Reportfeed />} />
       <Route path="/admin" element={<Admin/>}/>
       <Route path= "/archive" element={<Archive/>}/>
     </Routes>

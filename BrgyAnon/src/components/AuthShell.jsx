@@ -46,67 +46,60 @@ const handleLogin = async (e) => {
   setNotification("");
 
   if (!email.trim() || !password.trim()) {
-    setNotification("⚠️ Please enter email and password.");
+    setNotification("Please enter email and password");
     return;
   }
 
   try {
-    // ----- Admin login (codename) -----
-    if (!email.includes("@")) {
-      const adminRef = collection(db, "admin");
-      const q = query(adminRef, where("codename", "==", email));
-      const snapshot = await getDocs(q);
+    // 🔹 Check admin credentials first
+    const adminDocRef = doc(db, "admin", "admin");
+    const adminSnap = await getDoc(adminDocRef);
 
-      if (!snapshot.empty) {
-        const adminData = snapshot.docs[0].data();
-        if (adminData.isAdmin) {
+    if (adminSnap.exists()) {
+      const adminData = adminSnap.data();
+      const adminEmail = adminData.email?.trim().toLowerCase();
+      const adminPass = adminData.password;
+
+      // ✅ Check if input matches admin email
+      if (email.trim().toLowerCase() === adminEmail) {
+        if (password === adminPass) {
+          // Correct admin login
           await setDoc(
-            doc(db, "admin", snapshot.docs[0].id),
+            adminDocRef,
             { lastLogin: serverTimestamp() },
             { merge: true }
           );
+
           localStorage.setItem("brgy_is_admin", "true");
-          navigate("../admin");
+          navigate("/admin");
           return;
         } else {
-          setNotification("⚠️ This codename is not an admin account.");
-          return;
+          setNotification("Invalid admin password");
+          return; // STOP here if wrong password
         }
-      } else {
-        setNotification("⚠️ Codename not found.");
-        return;
       }
     }
 
     // ----- Normal email login (users) -----
-    const userCredential = await signInWithEmailAndPassword(auth, email, password);
-    const user = userCredential.user;
-
-    // ----- Check if user is deactivated -----
-    const archivedSnap = await getDoc(doc(db, "archive", user.uid));
+const archivedSnap = await getDoc(doc(db, "archive", user.uid));
     if (archivedSnap.exists()) {
-      setNotification("❌ Your account has been deleted or deactivated. Please contact admin.");
+      alert("Your account has been deactivated. Please contact admin.");
       await auth.signOut();
-      return; // Stop login here
+      return;
     }
 
-
-    // ----- Save user info -----
+    // 🔹 Update last login
     await setDoc(
       doc(db, "users", user.uid),
-      {
-        email: user.email,
-        userId: user.uid,
-        lastLogin: serverTimestamp(),
-      },
+      { email: user.email, userId: user.uid, lastLogin: serverTimestamp() },
       { merge: true }
     );
 
-    localStorage.removeItem("brgy_is_admin"); // just in case
-    navigate("../home");
+    localStorage.removeItem("brgy_is_admin");
+    navigate("/home");
   } catch (err) {
     console.error("Login failed:", err.message);
-    setNotification("❌ " + err.message);
+    alert("Login failed: " + err.message);
   }
 };
 
@@ -213,7 +206,7 @@ const handleGuestLogin = async (e) => {
     // Gumawa ng unique ID para sa guest user
     const guestId = "guest_" + Date.now();
 
-    await setDoc(doc(db, "users", guestId), {
+    await setDoc(doc(db, "guests", guestId), {
       fullName: fullName.trim(),
       purpose: purpose.trim() || null,
       isGuest: true,
@@ -400,7 +393,7 @@ function LoginForm({ email, setEmail, password, setPassword, onLogin, onGoogleSi
   return (
     <form className="space-y-4" onSubmit={onLogin}>
       <div className="space-y-2">
-        <label className="text-sm font-medium">Email or Username</label>
+        <label className="text-sm font-medium">Email</label>
         <input
           type="text" 
           placeholder="Enter your email address"

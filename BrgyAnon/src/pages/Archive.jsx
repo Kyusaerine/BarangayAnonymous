@@ -9,7 +9,6 @@ const Archive = () => {
   const [users, setUsers] = useState([]);
   const [archivedUsers, setArchivedUsers] = useState([]);
   const [archivedReports, setArchivedReports] = useState([]);
-
   const [notif, setNotif] = useState("");
 
   const showNotification = (message) => {
@@ -17,22 +16,32 @@ const Archive = () => {
     setTimeout(() => setNotif(""), 3000);
   };
 
-  // Fetch active users
+  // Fetch active users (exclude guest accounts)
   useEffect(() => {
     const fetchUsers = async () => {
       const snapshot = await getDocs(collection(db, "users"));
-      const data = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
-      setUsers(data);
+      const data = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+
+      const filtered = data.filter(
+        u => !(u.email?.toLowerCase().includes("guest") || u.displayName?.toLowerCase().includes("guest"))
+      );
+
+      setUsers(filtered);
     };
     fetchUsers();
   }, []);
 
-  // Fetch archived users
+  // Fetch archived users (exclude guest accounts)
   useEffect(() => {
     const fetchArchivedUsers = async () => {
       const snapshot = await getDocs(collection(db, "archive"));
-      const data = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
-      setArchivedUsers(data);
+      const data = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+
+      const filtered = data.filter(
+        u => !(u.email?.toLowerCase().includes("guest") || u.displayName?.toLowerCase().includes("guest"))
+      );
+
+      setArchivedUsers(filtered);
     };
     fetchArchivedUsers();
   }, []);
@@ -41,7 +50,7 @@ const Archive = () => {
   useEffect(() => {
     const fetchArchivedReports = async () => {
       const snapshot = await getDocs(collection(db, "archiveReports"));
-      const data = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+      const data = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
       setArchivedReports(data);
     };
     fetchArchivedReports();
@@ -49,39 +58,33 @@ const Archive = () => {
 
   // Deactivate user
   const handleDeactivate = async (user) => {
-    await setDoc(doc(db, "archive", user.id), {
-      ...user,
-      archivedAt: new Date(),
-    });
+    // Skip guest accounts just in case
+    if (user.email?.toLowerCase().includes("guest") || user.displayName?.toLowerCase().includes("guest")) return;
+
+    await setDoc(doc(db, "archive", user.id), { ...user, archivedAt: new Date() });
     await deleteDoc(doc(db, "users", user.id));
 
-    setUsers(users.filter((u) => u.id !== user.id));
+    setUsers(users.filter(u => u.id !== user.id));
     setArchivedUsers([...archivedUsers, { ...user, archivedAt: new Date() }]);
     showNotification("User deactivated successfully!");
   };
 
   // Restore user
   const handleRestoreUser = async (user) => {
-    await setDoc(doc(db, "users", user.id), {
-      ...user,
-      restoredAt: new Date(),
-    });
+    await setDoc(doc(db, "users", user.id), { ...user, restoredAt: new Date() });
     await deleteDoc(doc(db, "archive", user.id));
 
-    setArchivedUsers(archivedUsers.filter((u) => u.id !== user.id));
+    setArchivedUsers(archivedUsers.filter(u => u.id !== user.id));
     setUsers([...users, { ...user, restoredAt: new Date() }]);
     showNotification("User restored successfully!");
   };
 
   // Restore report
   const handleRestoreReport = async (report) => {
-    await setDoc(doc(db, "reports", report.id), {
-      ...report,
-      restoredAt: new Date(),
-    });
+    await setDoc(doc(db, "reports", report.id), { ...report, restoredAt: new Date() });
     await deleteDoc(doc(db, "archiveReports", report.id));
 
-    setArchivedReports(archivedReports.filter((r) => r.id !== report.id));
+    setArchivedReports(archivedReports.filter(r => r.id !== report.id));
     showNotification("Report restored successfully!");
   };
 
@@ -97,10 +100,7 @@ const Archive = () => {
       {/* Header */}
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold">Archive Management</h1>
-        <Link
-          to="/admin"
-          className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-        >
+        <Link to="/admin" className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">
           ← Go Back to Admin
         </Link>
       </div>
@@ -108,31 +108,19 @@ const Archive = () => {
       {/* Tabs */}
       <div className="flex border-b mb-6">
         <button
-          className={`px-4 py-2 font-semibold ${
-            activeTab === "active"
-              ? "border-b-2 border-blue-600 text-blue-600"
-              : "text-gray-500"
-          }`}
+          className={`px-4 py-2 font-semibold ${activeTab === "active" ? "border-b-2 border-blue-600 text-blue-600" : "text-gray-500"}`}
           onClick={() => setActiveTab("active")}
         >
           Active Users
         </button>
         <button
-          className={`ml-4 px-4 py-2 font-semibold ${
-            activeTab === "users"
-              ? "border-b-2 border-red-600 text-red-600"
-              : "text-gray-500"
-          }`}
+          className={`ml-4 px-4 py-2 font-semibold ${activeTab === "users" ? "border-b-2 border-red-600 text-red-600" : "text-gray-500"}`}
           onClick={() => setActiveTab("users")}
         >
           Archived Users
         </button>
         <button
-          className={`ml-4 px-4 py-2 font-semibold ${
-            activeTab === "reports"
-              ? "border-b-2 border-yellow-600 text-yellow-600"
-              : "text-gray-500"
-          }`}
+          className={`ml-4 px-4 py-2 font-semibold ${activeTab === "reports" ? "border-b-2 border-yellow-600 text-yellow-600" : "text-gray-500"}`}
           onClick={() => setActiveTab("reports")}
         >
           Archived Reports
@@ -154,30 +142,16 @@ const Archive = () => {
             <tbody>
               {users.length === 0 ? (
                 <tr>
-                  <td colSpan="4" className="text-center text-gray-500 py-6">
-                    No active users.
-                  </td>
+                  <td colSpan="4" className="text-center text-gray-500 py-6">No active users.</td>
                 </tr>
               ) : (
                 users.map((user, i) => (
-                  <tr
-                    key={user.id}
-                    className={i % 2 === 0 ? "bg-white" : "bg-gray-50"}
-                  >
+                  <tr key={user.id} className={i % 2 === 0 ? "bg-white" : "bg-gray-50"}>
                     <td className="px-4 py-2">{user.id}</td>
-                    <td className="px-4 py-2">
-                      {user.displayName ||
-                        user.fullName ||
-                        user.firstName ||
-                        user.lastName ||
-                        user.email}
-                    </td>
+                    <td className="px-4 py-2">{user.displayName || user.fullName || user.firstName || user.lastName || user.email}</td>
                     <td className="px-4 py-2">{user.email}</td>
                     <td className="px-4 py-2">
-                      <button
-                        onClick={() => handleDeactivate(user)}
-                        className="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700"
-                      >
+                      <button onClick={() => handleDeactivate(user)} className="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700">
                         Deactivate
                       </button>
                     </td>
@@ -205,35 +179,19 @@ const Archive = () => {
             <tbody>
               {archivedUsers.length === 0 ? (
                 <tr>
-                  <td colSpan="5" className="text-center text-gray-500 py-6">
-                    No archived users.
-                  </td>
+                  <td colSpan="5" className="text-center text-gray-500 py-6">No archived users.</td>
                 </tr>
               ) : (
                 archivedUsers.map((user, i) => (
-                  <tr
-                    key={user.id}
-                    className={i % 2 === 0 ? "bg-white" : "bg-gray-50"}
-                  >
+                  <tr key={user.id} className={i % 2 === 0 ? "bg-white" : "bg-gray-50"}>
                     <td className="px-4 py-2">{user.id}</td>
-                    <td className="px-4 py-2">
-                      {user.displayName ||
-                        user.fullName ||
-                        user.firstName ||
-                        user.lastName ||
-                        user.email}
-                    </td>
+                    <td className="px-4 py-2">{user.displayName || user.fullName || user.firstName || user.lastName || user.email}</td>
                     <td className="px-4 py-2">{user.email}</td>
                     <td className="px-4 py-2 text-xs text-gray-500">
-                      {user.archivedAt
-                        ? new Date(user.archivedAt.seconds * 1000).toLocaleString()
-                        : ""}
+                      {user.archivedAt ? new Date(user.archivedAt.seconds * 1000).toLocaleString() : ""}
                     </td>
                     <td className="px-4 py-2">
-                      <button
-                        onClick={() => handleRestoreUser(user)}
-                        className="px-3 py-1 bg-green-600 text-white rounded hover:bg-green-700"
-                      >
+                      <button onClick={() => handleRestoreUser(user)} className="px-3 py-1 bg-green-600 text-white rounded hover:bg-green-700">
                         Restore
                       </button>
                     </td>
@@ -261,29 +219,19 @@ const Archive = () => {
             <tbody>
               {archivedReports.length === 0 ? (
                 <tr>
-                  <td colSpan="5" className="text-center text-gray-500 py-6">
-                    No archived reports.
-                  </td>
+                  <td colSpan="5" className="text-center text-gray-500 py-6">No archived reports.</td>
                 </tr>
               ) : (
                 archivedReports.map((report, i) => (
-                  <tr
-                    key={report.id}
-                    className={i % 2 === 0 ? "bg-white" : "bg-gray-50"}
-                  >
+                  <tr key={report.id} className={i % 2 === 0 ? "bg-white" : "bg-gray-50"}>
                     <td className="px-4 py-2">{report.id}</td>
                     <td className="px-4 py-2">{report.title || "Untitled"}</td>
                     <td className="px-4 py-2">{report.userEmail}</td>
                     <td className="px-4 py-2 text-xs text-gray-500">
-                      {report.archivedAt
-                        ? new Date(report.archivedAt.seconds * 1000).toLocaleString()
-                        : ""}
+                      {report.archivedAt ? new Date(report.archivedAt.seconds * 1000).toLocaleString() : ""}
                     </td>
                     <td className="px-4 py-2">
-                      <button
-                        onClick={() => handleRestoreReport(report)}
-                        className="px-3 py-1 bg-green-600 text-white rounded hover:bg-green-700"
-                      >
+                      <button onClick={() => handleRestoreReport(report)} className="px-3 py-1 bg-green-600 text-white rounded hover:bg-green-700">
                         Restore
                       </button>
                     </td>
