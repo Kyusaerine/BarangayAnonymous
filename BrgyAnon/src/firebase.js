@@ -1,6 +1,7 @@
+// src/firebase.js
 import { initializeApp } from "firebase/app";
-import { getAuth, GoogleAuthProvider, sendPasswordResetEmail } from "firebase/auth";
-import { getFirestore, collection, addDoc, serverTimestamp } from "firebase/firestore";
+import { getFirestore, serverTimestamp } from "firebase/firestore";
+import { getAuth, GoogleAuthProvider } from "firebase/auth";
 
 const firebaseConfig = {
   apiKey: "AIzaSyCot7nlld9zzIZgYhg6_mv43-qE4xPNuSc",
@@ -13,20 +14,11 @@ const firebaseConfig = {
   measurementId: "G-JQNCSXEM3C"
 };
 
-// Initialize Firebase
 const app = initializeApp(firebaseConfig);
 
-// Exports
+export const db = getFirestore(app);
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
-export const db = getFirestore(app);
-
-// ✅ Corrected export
-export {
-  sendPasswordResetEmail,
-  collection,
-  addDoc,
-  serverTimestamp,
-};
+export { serverTimestamp };
 
 export default app;
