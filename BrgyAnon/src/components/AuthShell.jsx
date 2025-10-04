@@ -11,6 +11,7 @@ import {
   fetchSignInMethodsForEmail,
   EmailAuthProvider,
   linkWithCredential,
+  createUserWithEmailAndPassword,
       } from "firebase/auth";
 import { db, serverTimestamp } from "../firebase";
 import { collection, addDoc } from "firebase/firestore";
@@ -515,7 +516,6 @@ function ForgotPasswordModal({ open, onClose }) {
         await sendPasswordResetEmail(auth, email);
         setSent(true);
 
-        // 🔥 Log request in Firestore
         await addDoc(collection(db, "passwordResetRequests"), {
           email,
           provider: "password",

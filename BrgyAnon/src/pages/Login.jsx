@@ -13,7 +13,7 @@ import {
   sendPasswordResetEmail,
   createUserWithEmailAndPassword,
 } from "firebase/auth";
-import { doc, setDoc } from "firebase/firestore";
+import { doc, setDoc, addDoc, collection } from "firebase/firestore";
 
 export default function Login() {
   const [fullName, setFullName] = useState("");
@@ -143,30 +143,32 @@ export default function Login() {
 
   // 🔹 Forgot password with reset logging
   const handlePasswordReset = async () => {
-    try {
-      const methods = await fetchSignInMethodsForEmail(auth, email);
+  try {
+    const methods = await fetchSignInMethodsForEmail(auth, email);
 
-      if (methods.includes("password")) {
-        await sendPasswordResetEmail(auth, email);
+    if (methods.includes("password")) {
+      // Send reset link to Gmail
+      await sendPasswordResetEmail(auth, email);
 
-        // ✅ Firestore log
-        await addDoc(collection(db, "passwordResetRequests"), {
-          email,
-          requestedAt: serverTimestamp(),
-          triggeredBy: "manual-reset",
-        });
+      // Log to Firestore
+      await addDoc(collection(db, "passwordResetRequests"), {
+        email,
+        requestedAt: serverTimestamp(),
+        triggeredBy: "manual-reset",
+      });
 
-        setResetMessage("✅ Password reset email sent!");
-      } else if (methods.includes("google.com")) {
-        setResetMessage("⚠️ This email is registered with Google. Use Google login instead.");
-      } else {
-        setResetMessage("❌ No account found with this email.");
-      }
-    } catch (err) {
-      console.error("Forgot password error:", err);
-      setResetMessage("❌ " + err.message);
+      setResetMessage("✅ A password reset link has been sent to your email.");
+    } else if (methods.includes("google.com")) {
+      setResetMessage("⚠️ This email is registered with Google. Please use Google login instead.");
+    } else {
+      setResetMessage("❌ No account found with this email.");
     }
-  };
+  } catch (err) {
+    console.error("Forgot password error:", err);
+    setResetMessage("❌ " + err.message);
+  }
+};
+
 
   return (
     <AuthShell side="login" onGoogleSignIn={handleGoogleLogin}>

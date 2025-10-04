@@ -17,17 +17,16 @@ import {
 } from "react-icons/fi";
 import { Link } from "react-router-dom";
 
-
 /** Reaction definitions */
 const REACTIONS = [
-  { key: "like",  emoji: "👍", label: "Like"  },
-  { key: "love",  emoji: "❤️", label: "Love"  },
-  { key: "haha",  emoji: "😂", label: "Haha"  },
-  { key: "wow",   emoji: "😮", label: "Wow"   },
-  { key: "sad",   emoji: "😢", label: "Sad"   },
+  { key: "like", emoji: "👍", label: "Like" },
+  { key: "love", emoji: "❤️", label: "Love" },
+  { key: "haha", emoji: "😂", label: "Haha" },
+  { key: "wow", emoji: "😮", label: "Wow" },
+  { key: "sad", emoji: "😢", label: "Sad" },
   { key: "angry", emoji: "😡", label: "Angry" },
 ];
-const EMPTY_REACTIONS = { like:0, love:0, haha:0, wow:0, sad:0, angry:0 };
+const EMPTY_REACTIONS = { like: 0, love: 0, haha: 0, wow: 0, sad: 0, angry: 0 };
 
 const STATUS_OPTIONS = [
   "Waiting Approval",
@@ -43,15 +42,21 @@ export default function ReportFeed() {
   const [posts, setPosts] = useState([]);
   const [myReacts, setMyReacts] = useState({});
   const [showForm, setShowForm] = useState(false);
-  const [editing, setEditing] = useState(null); // ✅ Must be here
 
+  // NEW: edit + delete confirmation
+  const [editing, setEditing] = useState(null); // post object or null
+  const [confirmId, setConfirmId] = useState(null);
 
   const ensureShape = (p) => ({
-  ...p,
-  reactions: { ...EMPTY_REACTIONS, ...(p.reactions || {}) },
-  comments: Array.isArray(p.comments) ? p.comments : [],
-  status: normalizeStatus(p.status) || "Waiting Approval",
-  statusUpdatedAt: p.statusUpdatedAt ?? p.createdAt ?? Date.now(),
+    comments: [],
+    reactions: { ...EMPTY_REACTIONS },
+    status: "Waiting Approval",
+    statusUpdatedAt: p?.createdAt || Date.now(),
+    ...p,
+    reactions: { ...EMPTY_REACTIONS, ...(p.reactions || {}) },
+    comments: Array.isArray(p.comments) ? p.comments : [],
+    status: normalizeStatus(p.status) || "Waiting Approval",
+    statusUpdatedAt: p.statusUpdatedAt ?? p.createdAt ?? Date.now(),
   });
 
   const load = () => {
@@ -179,14 +184,13 @@ export default function ReportFeed() {
       <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 py-6 sm:py-8">
         {/* Header */}
         <div className="mb-6 grid gap-3 sm:grid-cols-[auto_1fr_auto] sm:items-end">
-          {/* Back to Home */}
-        
-          {/* Title */}
           <div className="text-center sm:text-left">
             <h1 className="text-2xl sm:text-3xl font-extrabold text-[var(--color-primary)]">
               Community Report Feed
             </h1>
-            <p className="text-black/70 text-sm">React, comment, edit, and track status.</p>
+            <p className="text-black/70 text-sm">
+              React, comment, edit, and track status.
+            </p>
           </div>
 
           {/* Actions */}
@@ -238,7 +242,7 @@ export default function ReportFeed() {
         )}
       </div>
 
-       {/* Modal: New report */}
+      {/* Modal: New report */}
       {showForm && (
         <NewReportModal
           onClose={() => setShowForm(false)}
@@ -306,17 +310,17 @@ function ConfirmDelete({ onCancel, onConfirm }) {
   );
 }
 
-/* ---------- Modal Form ---------- */
-const googleUser = JSON.parse(localStorage.getItem("googlename") || "{}");
+/* ---------- Modal: New Report ---------- */
 
 function NewReportModal({ onClose, onSaved }) {
   const [form, setForm] = useState({
-    userName: googleUser.fullname || "Guest",
+    userName: "",
     issue: "",
     location: "",
     desc: "",
     imagePreview: "",
     imageDataUrl: "",
+    status: "Waiting Approval",
   });
   const [error, setError] = useState("");
 
@@ -333,7 +337,11 @@ function NewReportModal({ onClose, onSaved }) {
     const preview = URL.createObjectURL(f);
     const reader = new FileReader();
     reader.onload = () =>
-      setForm((s) => ({ ...s, imagePreview: preview, imageDataUrl: reader.result }));
+      setForm((s) => ({
+        ...s,
+        imagePreview: preview,
+        imageDataUrl: reader.result,
+      }));
     reader.readAsDataURL(f);
   }
 
@@ -348,27 +356,39 @@ function NewReportModal({ onClose, onSaved }) {
       setError(err);
       return;
     }
+    const now = Date.now();
     const newPost = {
-      id: crypto?.randomUUID?.() || Date.now().toString(),
+      id: crypto?.randomUUID?.() || now.toString(),
       userId: "guest",
-      userName: googleUser.userName || "Guest",
+      userName: form.userName || "Guest",
       issue: form.issue,
       location: form.location,
       desc: form.desc.trim(),
-      imageUrl: form.imageDataUrl,
-      createdAt: Date.now(),
+      imageUrl: form.imageDataUrl || "",
+      createdAt: now,
       reactions: { ...EMPTY_REACTIONS },
       comments: [],
+      status: normalizeStatus(form.status) || "Waiting Approval",
+      statusUpdatedAt: now,
     };
     onSaved?.(newPost);
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true">
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-[1px]" onClick={onClose} />
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      role="dialog"
+      aria-modal="true"
+    >
+      <div
+        className="absolute inset-0 bg-black/40 backdrop-blur-[1px]"
+        onClick={onClose}
+      />
       <div className="relative z-10 w-full max-w-2xl rounded-2xl bg-white ring-1 ring-black/10 shadow-2xl">
         <div className="flex items-center justify-between px-5 py-4 border-b border-black/10">
-          <h2 className="text-lg font-bold text-[var(--color-primary)]">New Report</h2>
+          <h2 className="text-lg font-bold text-[var(--color-primary)]">
+            New Report
+          </h2>
           <button
             onClick={onClose}
             className="h-9 w-9 grid place-items-center rounded-xl hover:bg-black/5"
@@ -387,76 +407,67 @@ function NewReportModal({ onClose, onSaved }) {
           )}
 
           <div className="grid sm:grid-cols-2 gap-4">
-            <div className="space-y-1">
-              <label className="text-sm font-medium">Your Name</label>
-                <div className="w-full rounded-xl bg-[var(--color-secondary)] px-4 py-3 outline-none
-                           ring-1 ring-black/10 focus:ring-2 focus:ring-[var(--color-primary)]"
-                >{googleUser.fullname || "Guest"}
-            </div>
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-sm font-medium">Issue *</label>
-              <select
-                value={form.issue}
-                onChange={(e) => setForm((s) => ({ ...s, issue: e.target.value }))}
-                className="appearance-none w-full rounded-xl bg-[var(--color-secondary)] px-4 py-3 outline-none
-                           ring-1 ring-black/10 focus:ring-2 focus:ring-[var(--color-primary)]"
-                required
-              >
-                <option value="" disabled>Choose…</option>
-                {[
-                  "Road Damage",
-                  "Waste Management",
-                  "Street Lighting",
-                  "Water/Sanitation",
-                  "Noise/Disturbance",
-                  "Safety",
-                  "Others",
-                ].map((i) => (
-                  <option key={i} value={i}>{i}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <div className="space-y-1">
-            <label className="text-sm font-medium">Location</label>
-            <input
-              value={form.location}
-              onChange={(e) => setForm((s) => ({ ...s, location: e.target.value }))}
-              placeholder="e.g., Purok 2, near barangay hall"
-              className="w-full rounded-xl bg-[var(--color-secondary)] px-4 py-3 outline-none
-                         ring-1 ring-black/10 focus:ring-2 focus:ring-[var(--color-primary)]"
+            <TextField
+              label="Your Name"
+              placeholder="e.g., Juan Dela Cruz"
+              value={form.userName}
+              onChange={(v) => setForm((s) => ({ ...s, userName: v }))}
             />
-          </div>
 
-          <div className="space-y-1">
-            <div className="flex items-center justify-between">
-              <label className="text-sm font-medium">Description *</label>
-              <span className="text-xs text-black/60">{form.desc.length}/500</span>
-            </div>
-            <textarea
-              value={form.desc}
-              onChange={(e) =>
-                e.target.value.length <= 500 &&
-                setForm((s) => ({ ...s, desc: e.target.value }))
-              }
-              rows={5}
-              placeholder="Briefly describe the issue, when/where it happens, and any other details…"
-              className="w-full rounded-xl bg-[var(--color-secondary)] px-4 py-3 outline-none
-                         ring-1 ring-black/10 focus:ring-2 focus:ring-[var(--color-primary)]"
+            <SelectField
+              label="Issue *"
               required
+              value={form.issue}
+              onChange={(v) => setForm((s) => ({ ...s, issue: v }))}
+              options={[
+                "Road Damage",
+                "Waste Management",
+                "Street Lighting",
+                "Water/Sanitation",
+                "Noise/Disturbance",
+                "Safety",
+                "Others",
+              ]}
             />
           </div>
 
+          <TextField
+            label="Location"
+            placeholder="e.g., Purok 2, near barangay hall"
+            value={form.location}
+            onChange={(v) => setForm((s) => ({ ...s, location: v }))}
+          />
+
+          <TextareaField
+            label="Description *"
+            value={form.desc}
+            onChange={(v) =>
+              v.length <= 500 && setForm((s) => ({ ...s, desc: v }))
+            }
+            hint={`${form.desc.length}/500`}
+            required
+          />
+
+          <SelectField
+            label="Status"
+            value={form.status}
+            onChange={(v) => setForm((s) => ({ ...s, status: v }))}
+            options={STATUS_OPTIONS}
+          />
+
+          {/* Image upload */}
           <div className="space-y-2">
             <label className="text-sm font-medium">Photo (optional)</label>
             <div className="flex flex-wrap items-center gap-3">
               <label className="inline-flex items-center gap-2 rounded-xl px-4 py-2 ring-1 ring-black/10 hover:bg-black/5 cursor-pointer">
                 <FiUpload />
                 <span>Upload image</span>
-                <input type="file" accept="image/*" hidden onChange={handleImg} />
+                <input
+                  type="file"
+                  accept="image/*"
+                  hidden
+                  onChange={handleImg}
+                />
               </label>
 
               {form.imagePreview && (
@@ -701,20 +712,124 @@ function EditReportModal({ post, onClose, onSaved }) {
   );
 }
 
+
+function NewReportModal({ onClose, onSaved }) {
+  const [form, setForm] = useState({
+    userName: "",
+    issue: "",
+    location: "",
+    lat: null,
+    lng: null,
+    desc: "",
+    imagePreview: "",
+    imageDataUrl: "",
+    status: "Waiting Approval",
+  });
+
+  const locationRef = useRef(null);
+
+  // Auto-complete for typing locations
+  useEffect(() => {
+    if (!window.google || !locationRef.current) return;
+
+    const autocomplete = new window.google.maps.places.Autocomplete(
+      locationRef.current,
+      { types: ["geocode"] }
+    );
+
+    autocomplete.addListener("place_changed", () => {
+      const place = autocomplete.getPlace();
+      if (!place.geometry) return;
+      setForm((s) => ({
+        ...s,
+        location: place.formatted_address,
+        lat: place.geometry.location.lat(),
+        lng: place.geometry.location.lng(),
+      }));
+    });
+  }, []);
+
+  // Auto-detect user’s current location
+  function detectLocation() {
+    if (!navigator.geolocation) return alert("Geolocation not supported");
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+        const geocoder = new window.google.maps.Geocoder();
+        geocoder.geocode({ location: { lat, lng } }, (results, status) => {
+          if (status === "OK" && results[0]) {
+            setForm((s) => ({
+              ...s,
+              location: results[0].formatted_address,
+              lat,
+              lng,
+            }));
+          }
+        });
+      },
+      () => alert("Unable to fetch location.")
+    );
+  }
+
+  return (
+    <form onSubmit={submit} className="p-5 sm:p-6 space-y-4">
+      {/* ...other fields... */}
+
+      {/* Location with auto-detect */}
+      <div className="space-y-2">
+        <label className="text-sm font-medium">Location</label>
+        <div className="flex gap-2">
+          <input
+            ref={locationRef}
+            type="text"
+            placeholder="Type or detect location"
+            value={form.location}
+            onChange={(e) =>
+              setForm((s) => ({ ...s, location: e.target.value }))
+            }
+            className="flex-1 rounded-xl border px-3 py-2 text-sm"
+          />
+          <button
+            type="button"
+            onClick={detectLocation}
+            className="rounded-xl bg-[var(--color-primary)] text-white px-3 py-2 text-sm hover:bg-[var(--color-primary-hover)]"
+          >
+            Use GPS
+          </button>
+        </div>
+      </div>
+
+      {/* ...submit buttons */}
+    </form>
+  );
+}
+
+
 /* ---------- Card with Reactions + Comments ---------- */
 
-function ReportCard({ post, myReaction, onReact, onAddComment, onDelete }) {
+function ReportCard({
+  post,
+  myReaction,
+  onReact,
+  onAddComment,
+  onDelete,
+  onEdit,
+}) {
   const time = fmt(post.createdAt);
   const [openComments, setOpenComments] = useState(false);
   const [text, setText] = useState("");
 
-  const totalReacts =
-    (post.reactions?.like || 0) +
-    (post.reactions?.love || 0) +
-    (post.reactions?.haha || 0) +
-    (post.reactions?.wow || 0) +
-    (post.reactions?.sad || 0) +
-    (post.reactions?.angry || 0);
+  const totalReacts = useMemo(
+    () =>
+      (post.reactions?.like || 0) +
+      (post.reactions?.love || 0) +
+      (post.reactions?.haha || 0) +
+      (post.reactions?.wow || 0) +
+      (post.reactions?.sad || 0) +
+      (post.reactions?.angry || 0),
+    [post.reactions]
+  );
 
   function submitComment(e) {
     e.preventDefault();
@@ -722,11 +837,11 @@ function ReportCard({ post, myReaction, onReact, onAddComment, onDelete }) {
     onAddComment?.(text.trim());
     setText("");
     setOpenComments(true);
-
   }
+
   const { badgeBg, badgeRing, badgeText } = statusColors(post.status);
 
-    return (
+  return (
     <article className="rounded-2xl bg-white ring-1 ring-black/10 overflow-hidden hover:shadow transition">
       {/* Media */}
       <div className="relative h-40 bg-black/5">
@@ -943,6 +1058,17 @@ function TextareaField({ label, value, onChange, hint, required }) {
 }
 
 /* ---------- Bits ---------- */
+
+function Author({ name }) {
+  return (
+    <div className="inline-flex items-center gap-2">
+      <div className="h-8 w-8 rounded-full grid place-items-center bg-[var(--color-primary)] text-white ring-1 ring-black/10">
+        <FiUser className="text-sm" />
+      </div>
+      <span className="text-sm font-medium">{name}</span>
+    </div>
+  );
+}
 
 function EmptyState({ onNew }) {
   return (
