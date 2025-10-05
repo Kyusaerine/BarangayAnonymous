@@ -396,7 +396,7 @@ function LoginForm({ email, setEmail, password, setPassword, onLogin, onGoogleSi
       type="button"
       onClick={() => setShowPassword(!showPassword)}
       className="btn position-absolute top-50 end-0 translate-middle-y p-2 text-black-50 rounded-pill"
-      style={{ minWidth: "3rem" }}
+      style={{ minWidth: "2.5rem" }}
     >
       {showPassword ? <FiEyeOff size={20} /> : <FiEye size={20} />}
     </button>
