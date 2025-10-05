@@ -36,99 +36,87 @@ export default function Login() {
     }
   };
 
-// 🔹 Email/password login
-// 🔹 Email/password login
-const handleLogin = async (e) => {
-  e.preventDefault();
-
-  if (!email.trim() || !password.trim()) {
-    setNotification("Please enter email and password");
-    return;
-  }
-
-  try {
-    // Fetch admin doc first
-    const adminSnap = await getDoc(doc(db, "admin", "admin")); // <-- added this
-
-    if (adminSnap.exists()) {
-      const adminData = adminSnap.data();
-      if (email.trim() === adminData.email && password === adminData.password) {
-        await setDoc(
-          doc(db, "admin", "admin"),
-          { lastLogin: serverTimestamp() },
-          { merge: true }
-        );
-        localStorage.setItem("brgy_is_admin", "true");
-        navigate("/admin");
-        return;
-      } else if (email.trim() === adminData.email) {
-        setNotification("Invalid admin password");
-        return;
-      }
-    }
-
-    // Firebase login
-    const userCredential = await signInWithEmailAndPassword(auth, email, password);
-    const user = userCredential.user;
-
-    // Check if archived
-    const archivedSnap = await getDoc(doc(db, "archive", user.uid));
-    if (archivedSnap.exists()) {
-      alert("Your account has been deactivated. Please contact admin.");
-      await auth.signOut();
+  // 🔹 Email/password login
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    if (!email.trim() || !password.trim()) {
+      setNotification("Please enter email and password");
       return;
     }
 
-    // Save login info
-    await setDoc(
-      doc(db, "users", user.uid),
-      { email: user.email, userId: user.uid, lastLogin: serverTimestamp() },
-      { merge: true }
-    );
+    try {
+      const adminSnap = await getDoc(doc(db, "admin", "admin"));
+      if (adminSnap.exists()) {
+        const adminData = adminSnap.data();
+        if (email.trim() === adminData.email && password === adminData.password) {
+          await setDoc(doc(db, "admin", "admin"), { lastLogin: serverTimestamp() }, { merge: true });
+          localStorage.setItem("brgy_is_admin", "true");
+          navigate("/admin");
+          return;
+        } else if (email.trim() === adminData.email) {
+          setNotification("Invalid admin password");
+          return;
+        }
+      }
 
-    localStorage.removeItem("brgy_is_admin");
-    navigate("/home");
-  } catch (err) {
-    console.error("Login failed:", err.message);
-    alert(err.message);
-  }
-};
+      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      const user = userCredential.user;
 
+      const archivedSnap = await getDoc(doc(db, "archive", user.uid));
+      if (archivedSnap.exists()) {
+        alert("Your account has been deactivated. Please contact admin.");
+        await auth.signOut();
+        return;
+      }
 
-// 🔹 Google login
-const handleGoogleLogin = async () => {
-  try {
-    const result = await signInWithPopup(auth, googleProvider);
-    const user = result.user;
-
-    // Check if archived
-    const archivedSnap = await getDoc(doc(db, "archive", user.uid));
-    if (archivedSnap.exists()) {
-      alert("Your account has been deactivated. Please contact admin.");
-      await auth.signOut();
-      return; // STOP login
+      await setDoc(
+        doc(db, "users", user.uid),
+        { email: user.email, userId: user.uid, lastLogin: serverTimestamp() },
+        { merge: true }
+      );
+      localStorage.removeItem("brgy_is_admin");
+      navigate("/home");
+    } catch (err) {
+      console.error("Login failed:", err.message);
+      alert(err.message);
     }
+  };
 
-    // Save login info
-    await setDoc(
-      doc(db, "users", user.uid),
-      { fullName: user.displayName || "No Name", email: user.email, userId: user.uid, lastLogin: serverTimestamp() },
-      { merge: true }
-    );
+  // 🔹 Google login
+  const handleGoogleLogin = async () => {
+    try {
+      const result = await signInWithPopup(auth, googleProvider);
+      const user = result.user;
 
-    localStorage.setItem(
-      "googlename",
-      JSON.stringify({ fullName: user.displayName, email: user.email, userId: user.uid })
-    );
+      const archivedSnap = await getDoc(doc(db, "archive", user.uid));
+      if (archivedSnap.exists()) {
+        alert("Your account has been deactivated. Please contact admin.");
+        await auth.signOut();
+        return;
+      }
 
-    localStorage.removeItem("brgy_is_admin");
-    navigate("/home");
-  } catch (err) {
-    console.error("Google Sign-In error:", err);
-    alert("Google sign-in failed: " + err.message);
-  }
-};
+      await setDoc(
+        doc(db, "users", user.uid),
+        {
+          fullName: user.displayName || "No Name",
+          email: user.email,
+          userId: user.uid,
+          lastLogin: serverTimestamp(),
+        },
+        { merge: true }
+      );
 
+      localStorage.setItem(
+        "googlename",
+        JSON.stringify({ fullName: user.displayName, email: user.email, userId: user.uid })
+      );
+      localStorage.removeItem("brgy_is_admin");
+      navigate("/home");
+    } catch (err) {
+      console.error("Google Sign-In error:", err);
+      alert("Google sign-in failed: " + err.message);
+    }
+  };
 
   // 🔹 Guest login
   const handleGuestLogin = async () => {
@@ -160,7 +148,6 @@ const handleGoogleLogin = async () => {
   const handlePasswordReset = async () => {
     try {
       const methods = await fetchSignInMethodsForEmail(auth, email);
-
       if (methods.includes("password")) {
         await sendPasswordResetEmail(auth, email);
         setResetMessage("📩 Please check your email for the password reset link.");
@@ -182,98 +169,101 @@ const handleGoogleLogin = async () => {
 
   return (
     <AuthShell side="login" onGoogleSignIn={handleGoogleLogin}>
-      <div className="text-center mb-6">
-        <h1 className="text-2xl sm:text-3xl font-bold text-[var(--color-primary)]">Welcome</h1>
-        <p className="text-muted">Log in or continue as Guest</p>
+      <div className="text-center mb-4">
+        <h1 className="h3 fw-bold text-success">Welcome</h1>
+        <p className="text-muted mb-3">Log in or continue as Guest</p>
       </div>
 
-      <form className="space-y-4" onSubmit={handleLogin}>
+      <form onSubmit={handleLogin}>
         {/* Email */}
-        <div className="space-y-2">
-          <label htmlFor="email" className="form-label">Email</label>
+        <div className="mb-3">
+          <label htmlFor="email" className="form-label">
+            Email
+          </label>
           <input
             id="email"
-            type="text"
-            placeholder="name@example.com"
+            type="email"
+            className="form-control rounded-pill"
+            placeholder="name@gmail.com"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             onBlur={() => checkSignInMethod(email)}
-            className="form-control"
           />
         </div>
 
         {/* Password with toggle */}
-        <div className="space-y-2 relative">
-          <label htmlFor="password" className="text-sm font-medium">Password</label>
+        <div className="mb-3 position-relative">
+          <label htmlFor="password" className="form-label">
+            Password
+          </label>
           <input
             id="password"
             type={showPassword ? "text" : "password"}
+            className="form-control rounded-pill"
             placeholder="••••••••"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="form-control"
           />
           <button
             type="button"
             onClick={() => setShowPassword(!showPassword)}
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500"
+            className="btn position-absolute top-50 end-0 translate-middle-y text-success"
+            style={{ border: "none", background: "transparent", zIndex: 10 }}
           >
             {showPassword ? <FiEyeOff size={20} /> : <FiEye size={20} />}
           </button>
         </div>
 
-        <button
-          type="submit"
-          className="block w-full text-center mt-2 rounded-2xl px-5 py-3 font-semibold tracking-wide bg-[var(--color-primary)] text-white hover:bg-[var(--color-primary-hover)] transition"
-        >
+        {notification && <div className="mb-2 text-danger">{notification}</div>}
+
+        <button type="submit" className="btn btn-success w-100 mb-3">
           LOG IN
         </button>
 
         {/* OR divider */}
-        <div className="flex items-center gap-3 my-4">
-          <hr className="flex-grow border-gray-300" />
-          <span className="text-xs text-gray-500">OR</span>
-          <hr className="flex-grow border-gray-300" />
+        <div className="d-flex align-items-center my-3">
+          <hr className="flex-grow-1" />
+          <span className="mx-2 text-muted small">OR</span>
+          <hr className="flex-grow-1" />
         </div>
 
         {/* Google login */}
-        <button type="button" onClick={handleGoogleLogin} className="btn btn-default">
-          Sign in with Google <FaGoogle style={{ color: "#EA4335" }} />
+        <button
+          type="button"
+          className="btn btn-light rounded-pill d-flex align-items-center justify-content-center gap-2 py-2 w-100 mb-3"
+          onClick={handleGoogleLogin}
+        >
+          <FaGoogle style={{ color: "#EA4335" }} /> Sign in with Google
         </button>
 
         {/* Forgot password */}
-        <button
-          type="button"
-          onClick={handlePasswordReset}
-          className="text-sm text-blue-600 underline mt-2"
-        >
-          Forgot Password?
-        </button>
+        <div className="text-center mb-3">
+          <button type="button" onClick={handlePasswordReset} className="btn btn-link p-0">
+            Forgot Password?
+          </button>
+        </div>
 
-        {notification && <p className="text-sm text-center text-red-600 mt-1">{notification}</p>}
-        {resetMessage && <p className="text-sm text-center text-gray-600 mt-1">{resetMessage}</p>}
-        {error && <p className="text-sm text-center text-red-600 mt-1">{error}</p>}
+        {resetMessage && <div className="mb-2 text-muted text-center small">{resetMessage}</div>}
+        {error && <div className="mb-2 text-danger text-center">{error}</div>}
       </form>
 
       {/* Guest login */}
-      <div className="mt-4">
-        <label htmlFor="guestName" className="text-sm font-medium">Guest Name (optional)</label>
+      <div className="mt-3">
+        <label htmlFor="guestName" className="form-label">
+          Guest Name (optional)
+        </label>
         <input
           id="guestName"
           type="text"
-          placeholder="Enter your name"
+          placeholder="Juan Dela Cruz"
+          className="form-control mb-2"
           value={fullName}
           onChange={(e) => setFullName(e.target.value)}
-          className="form-control"
         />
-        <button
-          type="button"
-          onClick={handleGuestLogin}
-          className="block w-full text-center mt-2 rounded-2xl px-5 py-3 font-semibold tracking-wide bg-gray-500 text-white hover:bg-gray-600 transition"
-        >
+        <button type="button" onClick={handleGuestLogin} className="btn btn-secondary w-100">
           CONTINUE AS GUEST
         </button>
-        {guestNameError && <p className="text-sm text-red-600 mt-1">{guestNameError}</p>}
+        {guestNameError && <div className="mt-1 text-danger small">{guestNameError}</div>}
       </div>
     </AuthShell>
   );

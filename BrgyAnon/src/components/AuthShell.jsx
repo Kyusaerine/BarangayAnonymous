@@ -12,20 +12,15 @@ import {
   EmailAuthProvider,
   linkWithCredential,
   createUserWithEmailAndPassword,
-  signInAnonymously,
 } from "firebase/auth";
 import {
   doc,
   setDoc,
   addDoc,
   collection,
-  query,       
-  where,      
   getDoc,
-  getDocs,
 } from "firebase/firestore";
 import { FiEye, FiEyeOff } from "react-icons/fi";
-import Register from "../pages/Register";
 
 export default function AuthShell() {
   const [mode, setMode] = useState("login"); // "login" | "guest"
@@ -40,68 +35,63 @@ export default function AuthShell() {
 
   const navigate = useNavigate();
 
-// ---------- Email/Password login ----------
-const handleLogin = async (e) => {
-  e.preventDefault();
-  setNotification("");
+  // ---------- Email/Password login ----------
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    setNotification("");
 
-  if (!email.trim() || !password.trim()) {
-    setNotification("Please enter email and password");
-    return;
-  }
-
-  try {
-    // 🔹 Check admin credentials first
-    const adminDocRef = doc(db, "admin", "admin");
-    const adminSnap = await getDoc(adminDocRef);
-
-    if (adminSnap.exists()) {
-      const adminData = adminSnap.data();
-      const adminEmail = adminData.email?.trim().toLowerCase();
-      const adminPass = adminData.password;
-
-      // ✅ Check if input matches admin email
-      if (email.trim().toLowerCase() === adminEmail) {
-        if (password === adminPass) {
-          // Correct admin login
-          await setDoc(
-            adminDocRef,
-            { lastLogin: serverTimestamp() },
-            { merge: true }
-          );
-
-          localStorage.setItem("brgy_is_admin", "true");
-          navigate("/admin");
-          return;
-        } else {
-          setNotification("Invalid admin password");
-          return; // STOP here if wrong password
-        }
-      }
-    }
-
-    // ----- Normal email login (users) -----
-const archivedSnap = await getDoc(doc(db, "archive", user.uid));
-    if (archivedSnap.exists()) {
-      alert("Your account has been deactivated. Please contact admin.");
-      await auth.signOut();
+    if (!email.trim() || !password.trim()) {
+      setNotification("Please enter email and password");
       return;
     }
 
-    // 🔹 Update last login
-    await setDoc(
-      doc(db, "users", user.uid),
-      { email: user.email, userId: user.uid, lastLogin: serverTimestamp() },
-      { merge: true }
-    );
+    try {
+      // Check admin credentials first
+      const adminDocRef = doc(db, "admin", "admin");
+      const adminSnap = await getDoc(adminDocRef);
 
-    localStorage.removeItem("brgy_is_admin");
-    navigate("/home");
-  } catch (err) {
-    console.error("Login failed:", err.message);
-    alert("Login failed: " + err.message);
-  }
-};
+      if (adminSnap.exists()) {
+        const adminData = adminSnap.data();
+        const adminEmail = adminData.email?.trim().toLowerCase();
+        const adminPass = adminData.password;
+
+        if (email.trim().toLowerCase() === adminEmail) {
+          if (password === adminPass) {
+            await setDoc(adminDocRef, { lastLogin: serverTimestamp() }, { merge: true });
+            localStorage.setItem("brgy_is_admin", "true");
+            navigate("/admin");
+            return;
+          } else {
+            setNotification("Invalid admin password");
+            return;
+          }
+        }
+      }
+
+      // Normal user login
+      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      const user = userCredential.user;
+
+      const archivedSnap = await getDoc(doc(db, "archive", user.uid));
+      if (archivedSnap.exists()) {
+        alert("Your account has been deactivated. Please contact admin.");
+        await auth.signOut();
+        return;
+      }
+
+      await setDoc(
+        doc(db, "users", user.uid),
+        { email: user.email, userId: user.uid, lastLogin: serverTimestamp() },
+        { merge: true }
+      );
+
+      localStorage.removeItem("brgy_is_admin");
+      navigate("/home");
+    } catch (err) {
+      console.error("Login failed:", err.message);
+      alert("Login failed: " + err.message);
+    }
+  };
 
   // ---------- Sign up ----------
   const handleSignup = async (e) => {
@@ -125,106 +115,91 @@ const archivedSnap = await getDoc(doc(db, "archive", user.uid));
     }
   };
 
+  // ---------- Google Login ----------
   const handleGoogleLogin = async () => {
-  setNotification("");
-  try {
-    const result = await signInWithPopup(auth, googleProvider);
-    const user = result.user;
+    setNotification("");
+    try {
+      const result = await signInWithPopup(auth, googleProvider);
+      const user = result.user;
 
-    // ----- Check if user is deactivated -----
-    const archivedSnap = await getDoc(doc(db, "archive", user.uid));
-    if (archivedSnap.exists()) {
-      setNotification("❌ Your account has been deleted or deactivated. Please contact admin.");
-      await auth.signOut();
-      return; // Stop login here
-    }
-
-    // ----- Optional: link temp password for users without password -----
-    const methods = await fetchSignInMethodsForEmail(auth, user.email);
-    if (!methods.includes("password")) {
-      const tempPassword = "TempPass123!";
-      const credential = EmailAuthProvider.credential(user.email, tempPassword);
-      try {
-        await linkWithCredential(user, credential);
-        await sendPasswordResetEmail(auth, user.email);
-      } catch (err) {
-        if (err.code !== "auth/provider-already-linked") throw err;
+      const archivedSnap = await getDoc(doc(db, "archive", user.uid));
+      if (archivedSnap.exists()) {
+        setNotification("❌ Your account has been deleted or deactivated. Please contact admin.");
+        await auth.signOut();
+        return;
       }
 
-      try {
-        await addDoc(collection(db, "passwordResetRequests"), {
-          email: user.email,
-          requestedAt: serverTimestamp(),
-          triggeredBy: "auto-link",
-        });
-      } catch (err) {
-        console.warn("Could not log password reset request:", err.message);
+      const methods = await fetchSignInMethodsForEmail(auth, user.email);
+      if (!methods.includes("password")) {
+        const tempPassword = "TempPass123!";
+        const credential = EmailAuthProvider.credential(user.email, tempPassword);
+        try {
+          await linkWithCredential(user, credential);
+          await sendPasswordResetEmail(auth, user.email);
+        } catch (err) {
+          if (err.code !== "auth/provider-already-linked") throw err;
+        }
+
+        try {
+          await addDoc(collection(db, "passwordResetRequests"), {
+            email: user.email,
+            requestedAt: serverTimestamp(),
+            triggeredBy: "auto-link",
+          });
+        } catch (err) {
+          console.warn("Could not log password reset request:", err.message);
+        }
       }
-    }
 
-    // ----- Save user info -----
-    await setDoc(
-      doc(db, "users", user.uid),
-      {
-        fullName: user.displayName || "No Name",
-        email: user.email,
-        userId: user.uid,
-        lastLogin: serverTimestamp(),
-      },
-      { merge: true }
-    );
+      await setDoc(
+        doc(db, "users", user.uid),
+        { fullName: user.displayName || "No Name", email: user.email, userId: user.uid, lastLogin: serverTimestamp() },
+        { merge: true }
+      );
 
-    localStorage.setItem(
-      "googlename",
-      JSON.stringify({
+      localStorage.setItem("googlename", JSON.stringify({
         fullName: user.displayName,
         email: user.email,
         userId: user.uid,
-      })
-    );
+      }));
 
-    localStorage.removeItem("brgy_is_admin");
-    navigate("../home");
-  } catch (err) {
-    console.error("Google Sign-In error:", err);
-    setNotification("❌ Google sign-in failed: " + err.message);
-  }
-};
+      localStorage.removeItem("brgy_is_admin");
+      navigate("../home");
+    } catch (err) {
+      console.error("Google Sign-In error:", err);
+      setNotification("Google sign-in failed: " + err.message);
+    }
+  };
 
+  // ---------- Guest Login ----------
+  const handleGuestLogin = async (e) => {
+    e.preventDefault();
+    setNotification("");
 
-  // ---------- Guest login ----------
-const handleGuestLogin = async (e) => {
-  e.preventDefault();
-  setNotification("");
+    if (!fullName.trim()) {
+      setNotification("⚠️ Please enter your full name.");
+      return;
+    }
 
-  if (!fullName.trim()) {
-    setNotification("⚠️ Please enter your full name.");
-    return;
-  }
+    try {
+      const guestId = "guest_" + Date.now();
 
-  try {
-    // Gumawa ng unique ID para sa guest user
-    const guestId = "guest_" + Date.now();
+      await setDoc(doc(db, "guests", guestId), {
+        fullName: fullName.trim(),
+        purpose: purpose.trim() || null,
+        isGuest: true,
+        createdAt: serverTimestamp(),
+      });
 
-    await setDoc(doc(db, "guests", guestId), {
-      fullName: fullName.trim(),
-      purpose: purpose.trim() || null,
-      isGuest: true,
-      createdAt: serverTimestamp(),
-    });
+      localStorage.setItem("guestUser", JSON.stringify({ fullName, purpose, guestId }));
+      navigate("../home");
+    } catch (err) {
+      console.error("Guest login failed:", err);
+      setNotification("Failed to login as guest. Please try again.");
+    }
+  };
 
-    // I-save sa localStorage para magamit sa buong session
-    localStorage.setItem("guestUser", JSON.stringify({ fullName, purpose, guestId }));
-
-    navigate("../home");
-  } catch (err) {
-    console.error("Guest login failed:", err);
-    setNotification("Failed to login as guest. Please try again.");
-  }
-};
-
-
-  // ---------- Forgot password ----------
+  // ---------- Forgot Password ----------
   const handlePasswordReset = async (emailToReset) => {
     setNotification("");
     try {
@@ -239,6 +214,8 @@ const handleGuestLogin = async (e) => {
       } catch (err) {
         console.warn("Could not log password reset request:", err.message);
       }
+
+      setNotification("📩 Please check your email for the password reset link.");
     } catch (err) {
       console.error("Password reset failed:", err);
       setNotification("📩 Please check your email for the password reset link.");
@@ -265,7 +242,7 @@ const handleGuestLogin = async (e) => {
                 <Header title="Welcome" subtitle="Log in or continue as Guest" />
 
                 {notification && (
-                  <div className="mb-4 rounded-lg bg-yellow-100 border border-yellow-400 text-yellow-800 px-4 py-2 text-sm text-center">
+                  <div className="alert alert-warning text-center">
                     {notification}
                   </div>
                 )}
@@ -337,7 +314,7 @@ const handleGuestLogin = async (e) => {
                 <Header title="Guest Login" subtitle="Continue as a guest user" />
 
                 {notification && (
-                  <div className="mb-4 rounded-lg bg-yellow-100 border border-yellow-400 text-yellow-800 px-4 py-2 text-sm text-center">
+                  <div className="alert alert-warning text-center">
                     {notification}
                   </div>
                 )}
@@ -381,9 +358,9 @@ const handleGuestLogin = async (e) => {
 
 function Header({ title, subtitle }) {
   return (
-    <div className="text-center mb-6">
-      <h1 className="text-2xl sm:text-3xl font-extrabold text-[var(--color-primary)]">{title}</h1>
-      <p className="text-sm sm:text-base text-black/60 mt-1">{subtitle}</p>
+    <div className="mb-4 text-center">
+      <h1 className="fw-bold text-success">{title}</h1>
+      <p className="text-muted">{subtitle}</p>
     </div>
   );
 }
@@ -391,53 +368,58 @@ function Header({ title, subtitle }) {
 function LoginForm({ email, setEmail, password, setPassword, onLogin, onGoogleSignIn, onForgot }) {
   const [showPassword, setShowPassword] = useState(false);
   return (
-    <form className="space-y-4" onSubmit={onLogin}>
-      <div className="space-y-2">
+     <form className="d-grid gap-2" onSubmit={onLogin}>
         <label className="text-sm font-medium">Email</label>
         <input
           type="text" 
           placeholder="Enter your email address"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          className="form-control"
+          className="form-control rounded-pill"
         />
-      </div>
 
+      {/* Password with toggle */}
+<div className="mb-3">
+  <label htmlFor="password" className="form-label">
+    Password
+  </label>
+  <div className="input-group">
+    <input
+      id="password"
+      type={showPassword ? "text" : "password"}
+      className="form-control rounded-pill"
+      placeholder="••••••••"
+      value={password}
+      onChange={(e) => setPassword(e.target.value)}
+    />
+    <button
+      type="button"
+      onClick={() => setShowPassword(!showPassword)}
+      className="btn position-absolute top-50 end-0 translate-middle-y p-2 text-black-50 rounded-pill"
+      style={{ minWidth: "3rem" }}
+    >
+      {showPassword ? <FiEyeOff size={20} /> : <FiEye size={20} />}
+    </button>
+  </div>
+</div>
 
-      <div className="space-y-2 relative">
-        <label className="text-sm font-medium">Password</label>
-        <input
-          type={showPassword ? "text" : "password"}
-          placeholder="••••••••"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          className="form-control"
-        />
-        <button
-          type="button"
-          onClick={() => setShowPassword(!showPassword)}
-          className="absolute right-3 top-1/2 -translate-y-1/8 text-gray-500"
-        >
-          {showPassword ? <FiEyeOff size={20} /> : <FiEye size={20} />}
-        </button>
-      </div>
-
-      <button
-        type="submit"
-        className="w-full mt-2 rounded-2xl px-5 py-3 font-semibold tracking-wide bg-[var(--color-primary)] text-white hover:bg-[var(--color-primary-hover)] transition outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)]"
-      >
+     <button type="submit" className="btn btn-success rounded-pill py-2 mt-2">
         LOG IN
       </button>
 
-      <Divider />
-      <GoogleButton label="Sign in with Google" onClick={onGoogleSignIn} />
+      {/* OR divider */}
+          <div className="d-flex align-items-center gap-2 my-2">
+        <hr className="flex-grow border-gray-300 " />
+        <span className="text-xs text-gray-500">OR</span>
+        <hr className="flex-grow border-gray-300"/>
+      </div>
 
-      <div className="text-center">
-        <button
-          type="button"
-          onClick={onForgot}
-          className="text-sm text-[var(--color-primary)] hover:underline underline-offset-2"
-        >
+      <button type="button" className="btn btn-light rounded-pill d-flex align-items-center justify-content-center gap-2 py-2" onClick={onGoogleSignIn}>
+        <FaGoogle style={{ color: "#EA4335" }} /> Sign in with Google
+      </button>
+
+      <div className="d-flex justify-content-center mt-1">
+        <button type="button" className="btn btn-link text-success p-0" onClick={onForgot}>
           Forgot password?
         </button>
       </div>
@@ -445,58 +427,50 @@ function LoginForm({ email, setEmail, password, setPassword, onLogin, onGoogleSi
   );
 }
 
+
+/* ---------- GuestForm ---------- */
 function GuestForm({ fullName, setFullName, purpose, setPurpose, onGuestLogin, onGoogleSignIn }) {
   const navigate = useNavigate();
-
   return (
-    <form className="space-y-4" onSubmit={onGuestLogin}>
-      <div className="space-y-2">
-        <label className="text-sm font-medium">Full name</label>
-        <input
-          type="text"
-          placeholder="Juan Dela Cruz"
-          value={fullName}
-          onChange={(e) => setFullName(e.target.value)}
-          className="form-control"
-        />
-      </div>
+    <form className="space-y-2" onSubmit={onGuestLogin}>
+      <label className="text-sm font-medium">Full name</label>
+      <input
+        type="text"
+        placeholder="Juan Dela Cruz"
+        value={fullName}
+        onChange={(e) => setFullName(e.target.value)}
+        className="form-control rounded-pill"
+      />
 
-      <div className="space-y-2">
-        <label className="text-sm font-medium">Purpose (optional)</label>
-        <input
-          type="text"
-          placeholder="e.g., Barangay certificate inquiry"
-          value={purpose}
-          onChange={(e) => setPurpose(e.target.value)}
-          className="form-control"
-        />
-      </div>
+      <label className="text-sm font-medium mt-3">Purpose (optional)</label>
+      <input
+        type="text"
+        placeholder="e.g., Barangay certificate inquiry"
+        value={purpose}
+        onChange={(e) => setPurpose(e.target.value)}
+        className="form-control rounded-pill"
+      />
 
-
-      <button
-        type="submit"
-        className="btn btn-success w-100"
-      >
+      <button type="submit" className="btn btn-success rounded-pill py-2 w-100 mt-4">
         LOG IN AS GUEST
       </button>
 
       <Divider />
 
       <button
-          type="button"
-          onClick={() => navigate("/register")}
-          className="btn btn-outline-dark w-100"
-        >
-        <span className="text-success">Don’t have an account?</span>
-        </button>
+        type="button"
+        onClick={() => navigate("/register")}
+        className="btn btn-link text-success btn w-100 text-success hover:text-success/80"
+      >
+        Don’t have an account?
+      </button>
     </form>
   );
 }
 
-
 function Divider() {
   return (
-    <div className="flex items-center gap-3 my-4">
+    <div className="flex items-center gap-3 my-3">
       <hr className="flex-grow border-gray-300" />
       <span className="text-xs text-gray-500">OR</span>
       <hr className="flex-grow border-gray-300" />
@@ -504,18 +478,6 @@ function Divider() {
   );
 }
 
-function GoogleButton({ label, onClick }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="w-full flex items-center justify-center gap-3 rounded-2xl px-5 py-3 font-medium bg-white text-black ring-1 ring-gray-300 hover:bg-gray-100 transition outline-none focus-visible:ring-2 focus-visible:ring-[#4285F4]"
-    >
-      <FaGoogle style={{ color: "#EA4335" }} className="text-lg" />
-      {label}
-    </button>
-  );
-}
 
 function SwapButton({ onClick, children }) {
   return (
@@ -539,6 +501,7 @@ function PanelContent({ heading, body, art = "mail", children }) {
   );
 }
 
+/* ---------- ForgotPasswordModal ---------- */
 function ForgotPasswordModal({ open, onClose, onSubmit }) {
   const [email, setEmail] = useState("");
   const [sent, setSent] = useState(false);
@@ -567,7 +530,7 @@ function ForgotPasswordModal({ open, onClose, onSubmit }) {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-50 grid place-items-center p-4"
+          className="fixed inset-0 z-50 grid place-items-center p-2"
           aria-modal="true"
           role="dialog"
         >
@@ -577,15 +540,15 @@ function ForgotPasswordModal({ open, onClose, onSubmit }) {
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: 30, opacity: 0 }}
             transition={{ duration: 0.25 }}
-            className="relative z-10 w-full max-w-md rounded-2xl bg-white ring-1 ring-black/10 shadow-2xl"
+            className="relative z-10 w-full max-w-md rounded-2xl bg-white ring-1 ring-black/10 shadow-2xl p-4"
           >
-            <div className="px-5 py-4 border-b border-black/10">
-              <h3 className="font-semibold text-[var(--color-primary)]">Forgot Password</h3>
+            <div className="pb-2 border-b border-black/10">
+              <h3 className="font-semibold text-[var(--color-primary)] text-lg">Forgot Password</h3>
             </div>
 
             {!sent ? (
-              <form onSubmit={handleSubmit} className="p-5 space-y-4">
-                {error && <div className="rounded-xl px-3 py-2 text-sm bg-rose-50 text-rose-800 ring-1 ring-rose-200">{error}</div>}
+              <form onSubmit={handleSubmit} className="pt-2 space-y-3">
+                {error && <div className="alert alert-danger py-1">{error}</div>}
                 <div className="space-y-1">
                   <label className="text-sm font-medium">Email address</label>
                   <input
@@ -598,18 +561,18 @@ function ForgotPasswordModal({ open, onClose, onSubmit }) {
                   />
                 </div>
 
-                <div className="flex flex-col sm:flex-row gap-3 sm:justify-end pt-1">
-                  <button type="button" onClick={onClose} className="btn btn-outline-secondary fs-6 text-black">Cancel</button>
-                  <button type="submit" className="btn btn-success fs-6">Send reset link</button>
+                <div className="flex flex-col sm:flex-row gap-2 sm:justify-end pt-1">
+                  <button type="button" onClick={onClose} className="btn btn-outline-secondary fs-6 text-black py-1">Cancel</button>
+                  <button type="submit" className="btn btn-success fs-6 py-1">Send reset link</button>
                 </div>
               </form>
             ) : (
-              <div className="p-5 space-y-4">
-                <div className="rounded-xl bg-[var(--color-secondary)] ring-1 ring-black/10 p-4 text-sm">
+              <div className="space-y-2">
+                <div className="rounded-xl bg-[var(--color-secondary)] ring-1 ring-black/10 p-2 text-sm">
                   We’ve sent a password reset link to your email address: <b>{email}</b>.
                 </div>
                 <div className="flex justify-end">
-                  <button onClick={onClose} className="inline-flex justify-center rounded-xl px-5 py-2 font-semibold bg-[var(--color-primary)] text-white hover:bg-[var(--color-primary-hover)]">Done</button>
+                  <button onClick={onClose} className="inline-flex justify-center rounded-xl px-4 py-2 font-semibold bg-[var(--color-primary)] text-white hover:bg-[var(--color-primary-hover)]">Done</button>
                 </div>
               </div>
             )}
