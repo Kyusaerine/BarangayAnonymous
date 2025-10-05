@@ -120,16 +120,15 @@ export default function Home() {
                   type="button"
                   onClick={() => setShowForm((s) => !s)}
                   aria-expanded={showForm}
-                  className="rounded-xl px-5 py-3 font-semibold bg-white text-[var(--color-primary)]
-                             hover:bg-white/90 outline-none focus-visible:ring-2 focus-visible:ring-white"
+                   className={`btn btn-light rounded-pill px-4 py-2 fw-semibold border-0 shadow-sm 
+                ${showForm ? "text-primary" : "text-dark"}`}
                 >
                   {showForm ? "Close Form" : "Report an Issue"}
                 </button>
 
                 <Link
                   to="/dashboard/reportfeed"
-                  className="rounded-xl px-5 py-3 font-semibold bg-white/10 text-white ring-1 ring-white/40
-                             hover:bg-white/15 outline-none focus-visible:ring-2 focus-visible:ring-white"
+                  className="btn btn-outline-light rounded-pill px-4 py-2 fw-semibold text-transparent"
                 >
                   View Report Feed
                 </Link>
@@ -193,7 +192,7 @@ export default function Home() {
               <div className="flex items-center justify-between">
                 <h2 className="text-xl font-bold text-[var(--color-primary)]">Report an Issue</h2>
                 <Link
-                  to="/dashboard/new-report"
+                  to="/dashboard/NewReport"
                   className="text-sm font-semibold text-[var(--color-primary)] hover:underline"
                 >
                   Open full form
@@ -267,7 +266,7 @@ export default function Home() {
 
               <div className="flex justify-end">
                 <button
-                  className="rounded-xl px-5 py-2 font-semibold bg-[var(--color-primary)] text-white hover:bg-[var(--color-primary-hover)] focus-visible:ring-2 focus-visible:ring-[var(--color-primary)]"
+                 className="btn btn-success rounded-pill py-2 mt-2"
                 >
                   Submit Quick Report
                 </button>
@@ -326,7 +325,7 @@ export default function Home() {
             <div className="mt-6 flex flex-wrap gap-3">
               <Link
                 to="/dashboard/officials"
-                className="rounded-xl px-4 py-2 font-semibold ring-1 ring-black/10 hover:bg-black/5"
+                className="btn btn-outline-success rounded-pill px-4 py-2 fw-semibold text-transparent"
               >
                 Meet the Officials
               </Link>
@@ -401,7 +400,7 @@ export default function Home() {
           <div className="flex justify-start sm:justify-end gap-3">
             <Link
               to="/dashboard/profile"
-              className="rounded-xl px-4 py-2 font-semibold ring-1 ring-black/10 hover:bg-black/5"
+              className="btn btn-outline-success rounded-pill px-4 py-2 fw-semibold text-transparent"
             >
               View My Reports
             </Link>
