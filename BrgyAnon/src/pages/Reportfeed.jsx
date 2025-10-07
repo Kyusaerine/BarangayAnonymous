@@ -202,25 +202,36 @@ export default function ReportFeed() {
     setConfirmId(null);
   }
 
-  async function confirmDelete() {
-    if (!confirmId) return;
-    try {
-      // delete from Firestore
-      await deleteDoc(doc(db, "reports", confirmId));
-
-      // cleanup local reacts if any (onSnapshot will remove post, but cleanup reacts)
-      if (myReacts[confirmId]) {
-        const { [confirmId]: _, ...rest } = myReacts;
-        persistMyReacts(rest);
-      }
-
-      setConfirmId(null);
-      // no manual removal from posts needed because onSnapshot will update posts
-    } catch (err) {
-      console.error("Failed to delete report from Firebase:", err);
-      alert("Failed to delete report. Please try again.");
+async function confirmDelete() {
+  if (!confirmId) return;
+  try {
+    // 1️⃣ Get the post data before deleting
+    const postToDelete = posts.find((p) => p.id === confirmId);
+    if (postToDelete) {
+      // 2️⃣ Save it to an 'archive' collection in Firestore
+      await addDoc(collection(db, "archivedReports"), {
+        ...postToDelete,
+        deletedAt: Date.now(), // optional: track when it was archived
+      });
     }
+
+    // 3️⃣ Delete from 'reports' collection
+    await deleteDoc(doc(db, "reports", confirmId));
+
+    // 4️⃣ Cleanup local reacts if any
+    if (myReacts[confirmId]) {
+      const { [confirmId]: _, ...rest } = myReacts;
+      persistMyReacts(rest);
+    }
+
+    setConfirmId(null);
+    // onSnapshot will update posts automatically
+  } catch (err) {
+    console.error("Failed to delete report from Firebase:", err);
+    alert("Failed to delete report. Please try again.");
   }
+}
+
 
   // ---------- Reactions (optimistic + Firestore) ----------
   async function handleReact(id, key) {
