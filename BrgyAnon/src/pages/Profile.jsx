@@ -187,7 +187,6 @@ export default function Profile() {
     navigate("/login");
   };
 
-  // (Kept for compatibility, but NOT used in UI since you asked to remove Archive button on posts)
   const archiveReport = (reportId) => {
     try {
       const report = posts.find((p) => p.id === reportId);
@@ -208,14 +207,13 @@ export default function Profile() {
     }
   };
 
-  // Delete Report (moves to archives) — this is the ONLY button shown on each post
+  // Delete Report (moves to archives) 
 const deleteReport = async (reportId) => {
   try {
     // Find the report in posts
     const report = posts.find((p) => p.id === reportId);
     if (!report) return;
 
-    // 1️⃣ Add the report to archivedReports
     const archivedDoc = await addDoc(collection(db, "archivedReports"), {
       ...report,
       deletedAt: Date.now(),
@@ -228,12 +226,10 @@ const deleteReport = async (reportId) => {
     setArchives(updatedArchives);
     localStorage.setItem(LS_ARCHIVES, JSON.stringify(updatedArchives));
 
-    // 3️⃣ Remove the report from Firebase "reports"
     if (report.firebaseId) {
       await deleteDoc(doc(db, "reports", report.firebaseId));
     }
 
-    // 4️⃣ Remove the report from local posts + localStorage
     const updatedPosts = posts.filter((p) => p.id !== reportId);
     setPosts(updatedPosts);
     localStorage.setItem(LS_POSTS, JSON.stringify(updatedPosts));
@@ -245,17 +241,14 @@ const deleteReport = async (reportId) => {
 };
 
 
-  // ✅ FIXED Restore report from archives (ensures it shows in Profile + appears at top)
 const restoreReport = async (archiveId) => {
   try {
     const archivedReport = archives.find((a) => a.id === archiveId);
     if (!archivedReport) return;
 
-    // Remove deletedAt before restoring
     const restoredReport = { ...archivedReport };
     delete restoredReport.deletedAt;
 
-    // Add back to Firebase "reports" collection
     try {
       const newDocRef = await addDoc(collection(db, "reports"), restoredReport);
       restoredReport.firebaseId = newDocRef.id;
@@ -263,7 +256,6 @@ const restoreReport = async (archiveId) => {
       console.error("Failed to restore report to Firebase:", err);
     }
 
-    // Delete from Firebase "archivedReports" if firebaseId exists
     if (archivedReport.firebaseId) {
       try {
         await deleteDoc(doc(db, "archivedReports", archivedReport.firebaseId));
@@ -272,12 +264,10 @@ const restoreReport = async (archiveId) => {
       }
     }
 
-    // Remove from archives (localStorage + state)
     const updatedArchives = archives.filter((a) => a.id !== archiveId);
     setArchives(updatedArchives);
     localStorage.setItem(LS_ARCHIVES, JSON.stringify(updatedArchives));
 
-    // Add to posts (localStorage + state)
     const updatedPosts = [restoredReport, ...posts];
     setPosts(updatedPosts);
     localStorage.setItem(LS_POSTS, JSON.stringify(updatedPosts));
@@ -288,8 +278,6 @@ const restoreReport = async (archiveId) => {
   }
 };
 
-
-  // Filter archives based on search + date
   const filteredArchives = useMemo(() => {
     const now = new Date();
     return archives.filter((a) => {
@@ -471,8 +459,6 @@ const restoreReport = async (archiveId) => {
         </section>
       </div>
 
-     
-
       {/* Confirm Clear All Archives Modal */}
       <AnimatePresence>
         {showConfirmClear && (
@@ -631,7 +617,7 @@ const restoreReport = async (archiveId) => {
         )}
       </AnimatePresence>
 
-      {/* DELETE ACCOUNT CONFIRM MODAL (step 1) */}
+      {/* DELETE ACCOUNT CONFIRM MODAL */}
       <AnimatePresence>
         {showDelete && (
           <motion.div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
@@ -667,7 +653,7 @@ const restoreReport = async (archiveId) => {
         )}
       </AnimatePresence>
 
-      {/* PASSWORD CONFIRM MODAL (step 2) */}
+      {/* PASSWORD CONFIRM MODAL */}
       <AnimatePresence>
         {showConfirmDelete && (
           <motion.div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">

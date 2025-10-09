@@ -39,6 +39,7 @@ export default function Login() {
   // 🔹 Email/password login
   const handleLogin = async (e) => {
     e.preventDefault();
+    window.localStorage.setItem("isLogedIn", true)
     if (!email.trim() || !password.trim()) {
       setNotification("Please enter email and password");
       return;

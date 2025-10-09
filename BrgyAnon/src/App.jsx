@@ -9,14 +9,16 @@ import Reportfeed from "./pages/Reportfeed.jsx";
 import Register from "./pages/Register.jsx"; 
 import Admin from "./pages/Admin.jsx";
 import Archive from "./pages/Archive.jsx"
-
+import Logout from "./pages/Logout";
 
 export default function App() {
-  return (
+  const login = window.localStorage.getItem("isLogedIn");
+  Logout({ timeoutMinutes: 15  }); 
 
+  return (
     <Routes>
       <Route path="/" element={<Navigate to="/login" replace />} />
-      <Route path="/login" element={<Login />} />
+      <Route path="/login" element={login ? <Home /> : <Login />} />
       <Route path="/dashboard" element={<Dashboard />} />
       <Route path="/dashboard/officials" element={<Officials />} />
       <Route path="/home" element={<Home />} />
@@ -25,8 +27,8 @@ export default function App() {
       <Route path="/dashboard/profile" element={<Profile />} />
       <Route path="/dashboard/reportfeed" element={<Reportfeed />} />
       <Route path="/reportfeed" element={<Reportfeed />} />
-      <Route path="/admin" element={<Admin/>}/>
-      <Route path= "/archive" element={<Archive/>}/>
+      <Route path="/admin" element={<Admin />} />
+      <Route path="/archive" element={<Archive />} />
     </Routes>
   );
 }
