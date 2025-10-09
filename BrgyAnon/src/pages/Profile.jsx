@@ -221,7 +221,6 @@ const deleteReport = async (reportId) => {
       deletedAt: Date.now(),
     });
 
-    // 2️⃣ Optionally save Firebase ID for reference (if needed)
     const updatedArchives = [
       ...archives,
       { ...report, deletedAt: Date.now(), firebaseId: archivedDoc.id },
