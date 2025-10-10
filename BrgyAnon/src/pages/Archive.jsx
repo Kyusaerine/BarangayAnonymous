@@ -1,163 +1,143 @@
-// src/pages/Archive.jsx
 import React, { useEffect, useState } from "react";
 import {
   collection,
-  getDocs,
   deleteDoc,
   setDoc,
-  query,
-  where,
   doc,
   serverTimestamp,
+  onSnapshot,
 } from "firebase/firestore";
 import { db } from "../firebase";
-import { Link } from "react-router-dom";
+import {
+  FiArchive,
+  FiUser,
+  FiUsers,
+  FiMenu,
+  FiArrowLeftCircle,
+} from "react-icons/fi";
+import { useNavigate } from "react-router-dom";
 
 const Archive = () => {
-  const [activeTab, setActiveTab] = useState("active"); // active | users | reports
+  const [activeTab, setActiveTab] = useState("active");
   const [users, setUsers] = useState([]);
   const [archivedUsers, setArchivedUsers] = useState([]);
   const [archivedReports, setArchivedReports] = useState([]);
   const [notif, setNotif] = useState("");
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const navigate = useNavigate();
 
   const showNotification = (message) => {
     setNotif(message);
     setTimeout(() => setNotif(""), 3000);
   };
 
-  // Fetch active users (exclude guest accounts)
+  // Real-time listeners
   useEffect(() => {
-    const fetchUsers = async () => {
-      const snapshot = await getDocs(collection(db, "users"));
-      const data = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+    const unsubUsers = onSnapshot(collection(db, "users"), (snapshot) => {
+      const data = snapshot.docs.map((d) => ({ id: d.id, ...d.data(), isProcessing: false }));
       const filtered = data.filter(
         (u) =>
           !(u.email?.toLowerCase().includes("guest") ||
             u.displayName?.toLowerCase().includes("guest"))
       );
       setUsers(filtered);
-    };
-    fetchUsers();
-  }, []);
+    });
 
-  // Fetch archived users
-  useEffect(() => {
-    const fetchArchivedUsers = async () => {
-      const snapshot = await getDocs(collection(db, "archiveUsers")); // ✅ fixed
-      const data = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
-      const filtered = data.filter(
-        (u) =>
-          !(u.email?.toLowerCase().includes("guest") ||
-            u.displayName?.toLowerCase().includes("guest"))
-      );
-      setArchivedUsers(filtered);
-    };
-    fetchArchivedUsers();
-  }, []);
-
-  // Fetch archived reports
-  useEffect(() => {
-    const fetchArchivedReports = async () => {
-      const snapshot = await getDocs(collection(db, "archivedReports"));
-      const data = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
-      setArchivedReports(data);
-    };
-    fetchArchivedReports();
-  }, []);
-
-  // Deactivate user + archive their reports
-  const handleDeactivate = async (user) => {
-    if (
-      user.email?.toLowerCase().includes("guest") ||
-      user.displayName?.toLowerCase().includes("guest")
-    )
-      return;
-
-    try {
-      // 1️⃣ Archive the user
-      await setDoc(doc(db, "archiveUsers", user.id), { ...user, archivedAt: serverTimestamp() });
-      await deleteDoc(doc(db, "users", user.id));
-
-      // 2️⃣ Fetch all reports of this user
-      const reportsQuery = query(collection(db, "reports"), where("userEmail", "==", user.email));
-      const snapshot = await getDocs(reportsQuery);
-      const reports = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
-
-      // 3️⃣ Archive each report
-      for (const report of reports) {
-        await setDoc(doc(db, "archivedReports", report.id), {
-          ...report,
-          archivedAt: serverTimestamp(),
-        });
-        await deleteDoc(doc(db, "reports", report.id));
+    const unsubArchivedUsers = onSnapshot(
+      collection(db, "archiveUsers"),
+      (snapshot) => {
+        const data = snapshot.docs.map((d) => ({ id: d.id, ...d.data(), isProcessing: false }));
+        const filtered = data.filter(
+          (u) =>
+            !(u.email?.toLowerCase().includes("guest") ||
+              u.displayName?.toLowerCase().includes("guest"))
+        );
+        setArchivedUsers(filtered);
       }
+    );
 
-      // 4️⃣ Update local state
-      setUsers(users.filter((u) => u.id !== user.id));
-      setArchivedUsers([...archivedUsers, { ...user, archivedAt: new Date() }]);
-      setArchivedReports([
-        ...archivedReports,
-        ...reports.map((r) => ({ ...r, archivedAt: new Date() })),
-      ]);
+    const unsubArchivedReports = onSnapshot(
+      collection(db, "archivedReports"),
+      (snapshot) => {
+        const data = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+        setArchivedReports(data);
+      }
+    );
 
-      showNotification("User and their reports archived successfully!");
-    } catch (error) {
-      console.error("Error archiving user and reports:", error);
-    }
-  };
+    return () => {
+      unsubUsers();
+      unsubArchivedUsers();
+      unsubArchivedReports();
+    };
+  }, []);
 
-  // Restore user + their reports
+// Deactivate user completely
+const handleDeactivate = async (user) => {
+  try {
+    const archivedUserRef = doc(db, "archiveUsers", user.id);
+    const activeUserRef = doc(db, "users", user.id);
+
+    // Step 1: Move user to archive
+    await setDoc(archivedUserRef, {
+      ...user,
+      archivedAt: serverTimestamp(),
+      isActive: false,
+      archived: true,
+    });
+
+    // Step 2: Delete user from "users"
+    await deleteDoc(activeUserRef);
+
+    showNotification(`${user.displayName || "User"} deactivated successfully!`);
+
+    // Step 3: Update UI instantly
+    setUsers((prev) => prev.filter((u) => u.id !== user.id));
+    setArchivedUsers((prev) => [
+      ...prev.filter((u) => u.id !== user.id),
+      { ...user, archivedAt: new Date(), isActive: false },
+    ]);
+  } catch (error) {
+    console.error("Error deactivating user:", error);
+  }
+};
+
+  // Restore user
   const handleRestoreUser = async (user) => {
+    if (user.isProcessing) return;
+    user.isProcessing = true;
     try {
-      // 1️⃣ Restore the user
-      await setDoc(doc(db, "users", user.id), { ...user, restoredAt: serverTimestamp() });
-      await deleteDoc(doc(db, "archiveUsers", user.id)); // ✅ fixed
-
-      // 2️⃣ Fetch archived reports of this user
-      const reportsQuery = query(
-        collection(db, "archivedReports"),
-        where("userEmail", "==", user.email)
-      );
-      const snapshot = await getDocs(reportsQuery);
-      const reports = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
-
-      // 3️⃣ Restore each report
-      for (const report of reports) {
-        await setDoc(doc(db, "reports", report.id), {
-          ...report,
-          restoredAt: serverTimestamp(),
-        });
-        await deleteDoc(doc(db, "archivedReports", report.id));
-      }
-
-      // 4️⃣ Update local state
-      setArchivedUsers(archivedUsers.filter((u) => u.id !== user.id));
-      setUsers([...users, { ...user, restoredAt: new Date() }]);
-      setArchivedReports(archivedReports.filter((r) => r.userEmail !== user.email));
-
-      showNotification("User and their reports restored successfully!");
+      await setDoc(doc(db, "users", user.id), {
+        ...user,
+        restoredAt: serverTimestamp(),
+        isActive: true,
+      });
+      await deleteDoc(doc(db, "archiveUsers", user.id));
+      showNotification("User reactivated successfully!");
     } catch (error) {
-      console.error("Error restoring user and reports:", error);
+      console.error("Error restoring user:", error);
+    } finally {
+      user.isProcessing = false;
     }
   };
 
-  // Restore single report
+  // Restore report
   const handleRestoreReport = async (report) => {
+    if (report.isProcessing) return;
+    report.isProcessing = true;
     try {
       await setDoc(doc(db, "reports", report.id), {
         ...report,
         restoredAt: serverTimestamp(),
       });
       await deleteDoc(doc(db, "archivedReports", report.id));
-
-      setArchivedReports(archivedReports.filter((r) => r.id !== report.id));
       showNotification("Report restored successfully!");
     } catch (error) {
       console.error("Error restoring report:", error);
+    } finally {
+      report.isProcessing = false;
     }
   };
 
-  // Format Firestore timestamp safely
   const formatTimestamp = (timestamp) => {
     if (!timestamp) return "";
     return timestamp.seconds
@@ -166,175 +146,272 @@ const Archive = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-100 p-6">
-      {notif && (
-        <div className="fixed top-4 left-1/2 transform -translate-x-1/2 w-80 px-4 py-2 rounded bg-green-100 text-green-800 text-sm text-center shadow z-50">
-          {notif}
-        </div>
-      )}
+    <div className="container-fluid p-0 m-0">
+      <div className="d-flex flex-nowrap bg-light min-vh-100">
+        {/* Sidebar */}
+        <div
+          className={`text-white p-3 d-flex flex-column ${
+            sidebarOpen ? "sidebar-expanded" : "sidebar-collapsed"
+          }`}
+          style={{
+            width: sidebarOpen ? "250px" : "70px",
+            transition: "width 0.3s",
+            backgroundColor: "#0b2447",
+          }}
+        >
+          <div className="d-flex justify-content-between align-items-center mb-4">
+            <h5
+              className={`fw-bold mb-0 ${
+                sidebarOpen ? "opacity-100" : "opacity-0 d-none"
+              }`}
+            >
+              Archive Panel
+            </h5>
+            <FiMenu
+              className="fs-4 cursor-pointer"
+              role="button"
+              onClick={() => setSidebarOpen(!sidebarOpen)}
+            />
+          </div>
 
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold">Archive Management</h1>
-        <Link to="/admin" className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">
-          ← Go Back to Admin
-        </Link>
+          <ul className="nav nav-pills flex-column mb-auto">
+            <li className="nav-item mb-2">
+              <button
+                className={`nav-link w-100 text-start d-flex align-items-center ${
+                  activeTab === "active" ? "active bg-primary" : "text-light"
+                }`}
+                onClick={() => setActiveTab("active")}
+              >
+                <FiUsers className="me-2" />
+                {sidebarOpen && "Active Users"}
+              </button>
+            </li>
+            <li className="nav-item mb-2">
+              <button
+                className={`nav-link w-100 text-start d-flex align-items-center ${
+                  activeTab === "users" ? "active bg-primary" : "text-light"
+                }`}
+                onClick={() => setActiveTab("users")}
+              >
+                <FiUser className="me-2" />
+                {sidebarOpen && "Archived Users"}
+              </button>
+            </li>
+            <li className="nav-item mb-2">
+              <button
+                className={`nav-link w-100 text-start d-flex align-items-center ${
+                  activeTab === "reports" ? "active bg-primary" : "text-light"
+                }`}
+                onClick={() => setActiveTab("reports")}
+              >
+                <FiArchive className="me-2" />
+                {sidebarOpen && "Archived Reports"}
+              </button>
+            </li>
+          </ul>
+        </div>
+
+        {/* Main content */}
+        <div className="flex-grow-1 d-flex flex-column">
+          {/* Header */}
+          <div
+            className="d-flex justify-content-between align-items-center px-4 py-3 text-white shadow-sm"
+            style={{
+              backgroundColor: "#0b2447",
+              position: "sticky",
+              top: 0,
+              zIndex: 1000,
+            }}
+          >
+            <h4 className="fw-bold mb-0">Archive Dashboard</h4>
+            <button
+              className="btn btn-outline-light d-flex align-items-center gap-2"
+              onClick={() => navigate("/admin")}
+            >
+              <FiArrowLeftCircle />
+              Back to Admin
+            </button>
+          </div>
+
+          {/* Notification */}
+          {notif && (
+            <div
+              className="position-fixed top-0 end-0 m-3 p-3 bg-success text-white rounded shadow"
+              style={{ zIndex: 1050, minWidth: "250px" }}
+            >
+              {notif}
+            </div>
+          )}
+
+          {/* Content */}
+          <div className="container-fluid px-4 pt-5 mt-4">
+            {/* Active Users */}
+            {activeTab === "active" && (
+              <div className="card shadow border-0 rounded-4">
+                <div className="card-body">
+                  <h5 className="mb-3 fw-bold text-primary">Active Users</h5>
+                  <div className="table-responsive">
+                    <table className="table table-hover align-middle">
+                      <thead className="table-primary">
+                        <tr>
+                          <th>ID</th>
+                          <th>Name</th>
+                          <th>Email</th>
+                          <th>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {users.length === 0 ? (
+                          <tr>
+                            <td colSpan="4" className="text-center text-muted py-4">
+                              No active users.
+                            </td>
+                          </tr>
+                        ) : (
+                          users.map((user) => (
+                            <tr key={user.id}>
+                              <td>{user.id}</td>
+                              <td>
+                                {user.fullName ||
+                                  user.displayName ||
+                                  `${user.firstName || ""} ${user.lastName || ""}`.trim() ||
+                                  "Unknown"}
+                              </td>
+                              <td>{user.email}</td>
+                              <td>
+                                <button
+                                  className="btn btn-danger btn-sm"
+                                  disabled={user.isProcessing}
+                                  onClick={() => handleDeactivate(user)}
+                                >
+                                  Deactivate
+                                </button>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Archived Users */}
+            {activeTab === "users" && (
+              <div className="card shadow border-0 rounded-4">
+                <div className="card-body">
+                  <h5 className="mb-3 fw-bold text-danger">Archived Users</h5>
+                  <div className="table-responsive">
+                    <table className="table table-hover align-middle">
+                      <thead className="table-danger">
+                        <tr>
+                          <th>ID</th>
+                          <th>Name</th>
+                          <th>Email</th>
+                          <th>Archived At</th>
+                          <th>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {archivedUsers.length === 0 ? (
+                          <tr>
+                            <td colSpan="5" className="text-center text-muted py-4">
+                              No archived users.
+                            </td>
+                          </tr>
+                        ) : (
+                          archivedUsers.map((user) => (
+                            <tr key={user.id}>
+                              <td>{user.id}</td>
+                              <td>
+                                {user.fullName ||
+                                  user.displayName ||
+                                  `${user.firstName || ""} ${user.lastName || ""}`.trim() ||
+                                  "Unknown"}
+                              </td>
+                              <td>{user.email}</td>
+                              <td className="text-muted small">
+                                {formatTimestamp(user.archivedAt)}
+                              </td>
+                              <td>
+                                <button
+                                  className="btn btn-success btn-sm"
+                                  disabled={user.isProcessing}
+                                  onClick={() => handleRestoreUser(user)}
+                                >
+                                  Restore
+                                </button>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Archived Reports */}
+            {activeTab === "reports" && (
+              <div className="card shadow border-0 rounded-4">
+                <div className="card-body">
+                  <h5 className="mb-3 fw-bold text-warning">Archived Reports</h5>
+                  <div className="table-responsive">
+                    <table className="table table-hover align-middle">
+                      <thead className="table-warning">
+                        <tr>
+                          <th>ID</th>
+                          <th>Issue</th>
+                          <th>Reported By</th>
+                          <th>Archived At</th>
+                          <th>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {archivedReports.length === 0 ? (
+                          <tr>
+                            <td colSpan="5" className="text-center text-muted py-4">
+                              No archived reports.
+                            </td>
+                          </tr>
+                        ) : (
+                          archivedReports.map((report) => (
+                            <tr key={`archived-report-${report.id}`}>
+                              <td>{report.id}</td>
+                              <td>{report.issue || "Issue"}</td>
+                              <td>
+                                {report.reportedBy?.email ||
+                                report.reportedBy?.name ||
+                                report.reportedBy?.displayName ||
+                                "Unknown"}
+                              </td>
+                              <td className="text-muted small">
+                                {formatTimestamp(report.archivedAt)}
+                              </td>
+                              <td>
+                                <button
+                                  className="btn btn-success btn-sm"
+                                  disabled={report.isProcessing}
+                                  onClick={() => handleRestoreReport(report)}
+                                >
+                                  Restore
+                                </button>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+
+                    </table>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
-
-      {/* Tabs */}
-      <div className="flex border-b mb-6">
-        <button
-          className={`px-4 py-2 font-semibold ${
-            activeTab === "active" ? "border-b-2 border-blue-600 text-blue-600" : "text-gray-500"
-          }`}
-          onClick={() => setActiveTab("active")}
-        >
-          Active Users
-        </button>
-        <button
-          className={`ml-4 px-4 py-2 font-semibold ${
-            activeTab === "users" ? "border-b-2 border-red-600 text-red-600" : "text-gray-500"
-          }`}
-          onClick={() => setActiveTab("users")}
-        >
-          Archived Users
-        </button>
-        <button
-          className={`ml-4 px-4 py-2 font-semibold ${
-            activeTab === "reports" ? "border-b-2 border-yellow-600 text-yellow-600" : "text-gray-500"
-          }`}
-          onClick={() => setActiveTab("reports")}
-        >
-          Archived Reports
-        </button>
-      </div>
-
-
-      {/* Active Users Table */}
-      {activeTab === "active" && (
-        <div className="bg-white rounded-xl shadow overflow-x-auto">
-          <table className="min-w-full text-sm">
-            <thead className="bg-gray-100">
-              <tr>
-                <th className="px-4 py-2">ID</th>
-                <th className="px-4 py-2">Name</th>
-                <th className="px-4 py-2">Email</th>
-                <th className="px-4 py-2">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {users.length === 0 ? (
-                <tr>
-                  <td colSpan="4" className="text-center text-gray-500 py-6">
-                    No active users.
-                  </td>
-                </tr>
-              ) : (
-                users.map((user, i) => (
-                  <tr key={user.id} className={i % 2 === 0 ? "bg-white" : "bg-gray-50"}>
-                    <td className="px-4 py-2">{user.id}</td>
-                    <td className="px-4 py-2">{user.displayName || user.email}</td>
-                    <td className="px-4 py-2">{user.email}</td>
-                    <td className="px-4 py-2">
-                      <button
-                        onClick={() => handleDeactivate(user)}
-                        className="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700"
-                      >
-                        Deactivate
-                      </button>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {/* Archived Users Table */}
-      {activeTab === "users" && (
-        <div className="bg-white rounded-xl shadow overflow-x-auto">
-          <table className="min-w-full text-sm">
-            <thead className="bg-gray-100">
-              <tr>
-                <th className="px-4 py-2">ID</th>
-                <th className="px-4 py-2">Name</th>
-                <th className="px-4 py-2">Email</th>
-                <th className="px-4 py-2">Archived At</th>
-                <th className="px-4 py-2">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {archivedUsers.length === 0 ? (
-                <tr>
-                  <td colSpan="5" className="text-center text-gray-500 py-6">
-                    No archived users.
-                  </td>
-                </tr>
-              ) : (
-                archivedUsers.map((user, i) => (
-                  <tr key={user.id} className={i % 2 === 0 ? "bg-white" : "bg-gray-50"}>
-                    <td className="px-4 py-2">{user.id}</td>
-                    <td className="px-4 py-2">{user.displayName || user.email}</td>
-                    <td className="px-4 py-2">{user.email}</td>
-                    <td className="px-4 py-2 text-xs text-gray-500">{formatTimestamp(user.archivedAt)}</td>
-                    <td className="px-4 py-2">
-                      <button
-                        onClick={() => handleRestoreUser(user)}
-                        className="px-3 py-1 bg-green-600 text-white rounded hover:bg-green-700"
-                      >
-                        Restore
-                      </button>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {/* Archived Reports Table */}
-      {activeTab === "reports" && (
-        <div className="bg-white rounded-xl shadow overflow-x-auto">
-          <table className="min-w-full text-sm">
-            <thead className="bg-gray-100">
-              <tr>
-                <th className="px-4 py-2">Report ID</th>
-                <th className="px-4 py-2">Issue</th>
-                <th className="px-4 py-2">Reported By</th>
-                <th className="px-4 py-2">Archived At</th>
-                <th className="px-4 py-2">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {archivedReports.length === 0 ? (
-                <tr>
-                  <td colSpan="5" className="text-center text-gray-500 py-6">
-                    No archived reports.
-                  </td>
-                </tr>
-              ) : (
-                archivedReports.map((report, i) => (
-                  <tr key={report.id} className={i % 2 === 0 ? "bg-white" : "bg-gray-50"}>
-                    <td className="px-4 py-2">{report.id}</td>
-                    <td className="px-4 py-2">{report.issue || "Untitled"}</td>
-                    <td className="px-4 py-2">{report.userEmail || report.googleUser}</td>
-                    <td className="px-4 py-2 text-xs text-gray-500">{formatTimestamp(report.archivedAt)}</td>
-                    <td className="px-4 py-2">
-                      <button
-                        onClick={() => handleRestoreReport(report)}
-                        className="px-3 py-1 bg-green-600 text-white rounded hover:bg-green-700"
-                      >
-                        Restore
-                      </button>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      )}
     </div>
   );
 };

@@ -75,6 +75,18 @@ export default function Login() {
         { email: user.email, userId: user.uid, lastLogin: serverTimestamp() },
         { merge: true }
       );
+
+      // 🔹 Save profile for email/password user
+      localStorage.setItem(
+        "brgy_profile_data",
+        JSON.stringify({
+          loginType: "email",
+          email: user.email,
+          userId: user.uid,
+          lastLogin: new Date().toLocaleString(),
+        })
+      );
+
       localStorage.removeItem("brgy_is_admin");
       navigate("/home");
     } catch (err) {
@@ -107,10 +119,18 @@ export default function Login() {
         { merge: true }
       );
 
+      // 🔹 Save profile for Google login
       localStorage.setItem(
-        "googlename",
-        JSON.stringify({ fullName: user.displayName, email: user.email, userId: user.uid })
+        "brgy_profile_data",
+        JSON.stringify({
+          loginType: "google",
+          fullName: user.displayName || "No Name",
+          email: user.email,
+          userId: user.uid,
+          lastLogin: new Date().toLocaleString(),
+        })
       );
+
       localStorage.removeItem("brgy_is_admin");
       navigate("/home");
     } catch (err) {
@@ -135,8 +155,18 @@ export default function Login() {
         { merge: true }
       );
 
-      localStorage.setItem("guestName", fullName.trim());
-      localStorage.setItem("guestId", guestId);
+      // 🔹 Save profile for guest
+      localStorage.setItem(
+        "brgy_profile_data",
+        JSON.stringify({
+          loginType: "guest",
+          fullName: fullName.trim(),
+          userId: guestId,
+          isGuest: true,
+          lastLogin: new Date().toLocaleString(),
+        })
+      );
+
       localStorage.removeItem("brgy_is_admin");
       navigate("/home");
     } catch (err) {

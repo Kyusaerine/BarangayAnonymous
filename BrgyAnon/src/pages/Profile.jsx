@@ -21,7 +21,6 @@ export default function Profile() {
   const [showArchiveModal, setShowArchiveModal] = useState(false);
   const [showConfirmClear, setShowConfirmClear] = useState(false);
 
-
   // search + date filter
   const [searchTerm, setSearchTerm] = useState("");
   const [dateFilter, setDateFilter] = useState("all"); // all | today | week | month
@@ -36,6 +35,9 @@ export default function Profile() {
           password: "",
           profileImage: "", // photo
           lastLogin: new Date().toLocaleString(), // last login
+          loginType: "created", // default
+          googleName: "",
+          guestName: ""
         }
       );
     } catch {
@@ -46,6 +48,9 @@ export default function Profile() {
         password: "",
         profileImage: "",
         lastLogin: new Date().toLocaleString(),
+        loginType: "created",
+        googleName: "",
+        guestName: ""
       };
     }
   });
@@ -103,8 +108,25 @@ export default function Profile() {
     [posts]
   );
 
-  const displayName =
-    `${profile.firstName || ""} ${profile.lastName || ""}`.trim() || "User";
+  // Profile Name
+const displayName = (() => {
+  if (profile.loginType === "google" && profile.googleName)
+    return profile.googleName;
+
+  if (profile.loginType === "guest" && profile.guestName)
+    return profile.guestName;
+  
+  if (profile.loginType === "email" && profile.fullName) 
+    return profile.fullName;
+
+  if (profile.signupType === "created account") {
+    const fullName = `${profile.firstName || ""} ${
+      profile.lastName || ""
+    }`.trim();
+    if (fullName) return fullName;
+  }
+  return "User";
+})();
 
   const lastSubmitted = useMemo(() => {
     if (myPosts.length === 0) return "—";
@@ -146,6 +168,10 @@ export default function Profile() {
     const updated = {
       ...form,
       lastLogin: profile.lastLogin || new Date().toLocaleString(),
+      loginType: profile.loginType, 
+      email: profile.emailName || user.emailName || "",
+      googleName: profile.googleName || user.googleName || "",
+      guestName: profile.guestName || fullName.guestName || "",
     };
     try {
       localStorage.setItem(LS_PROFILE, JSON.stringify(updated));
@@ -154,6 +180,7 @@ export default function Profile() {
     setShowEdit(false);
     triggerToast("Profile updated successfully ✅");
   };
+
   // Account deletion (archive profile & clear LS)
   const onDelete = () => {
     try {
@@ -207,76 +234,73 @@ export default function Profile() {
     }
   };
 
-  // Delete Report (moves to archives) 
-const deleteReport = async (reportId) => {
-  try {
-    // Find the report in posts
-    const report = posts.find((p) => p.id === reportId);
-    if (!report) return;
-
-    const archivedDoc = await addDoc(collection(db, "archivedReports"), {
-      ...report,
-      deletedAt: Date.now(),
-    });
-
-    const updatedArchives = [
-      ...archives,
-      { ...report, deletedAt: Date.now(), firebaseId: archivedDoc.id },
-    ];
-    setArchives(updatedArchives);
-    localStorage.setItem(LS_ARCHIVES, JSON.stringify(updatedArchives));
-
-    if (report.firebaseId) {
-      await deleteDoc(doc(db, "reports", report.firebaseId));
-    }
-
-    const updatedPosts = posts.filter((p) => p.id !== reportId);
-    setPosts(updatedPosts);
-    localStorage.setItem(LS_POSTS, JSON.stringify(updatedPosts));
-
-    triggerToast("Report archived to Archived Reports ✅");
-  } catch (err) {
-    console.error("Failed to archive report:", err);
-  }
-};
-
-
-const restoreReport = async (archiveId) => {
-  try {
-    const archivedReport = archives.find((a) => a.id === archiveId);
-    if (!archivedReport) return;
-
-    const restoredReport = { ...archivedReport };
-    delete restoredReport.deletedAt;
-
+  const deleteReport = async (reportId) => {
     try {
-      const newDocRef = await addDoc(collection(db, "reports"), restoredReport);
-      restoredReport.firebaseId = newDocRef.id;
-    } catch (err) {
-      console.error("Failed to restore report to Firebase:", err);
-    }
+      const report = posts.find((p) => p.id === reportId);
+      if (!report) return;
 
-    if (archivedReport.firebaseId) {
-      try {
-        await deleteDoc(doc(db, "archivedReports", archivedReport.firebaseId));
-      } catch (err) {
-        console.error("Failed to delete archived report from Firebase:", err);
+      const archivedDoc = await addDoc(collection(db, "archivedReports"), {
+        ...report,
+        deletedAt: Date.now(),
+      });
+
+      const updatedArchives = [
+        ...archives,
+        { ...report, deletedAt: Date.now(), firebaseId: archivedDoc.id },
+      ];
+      setArchives(updatedArchives);
+      localStorage.setItem(LS_ARCHIVES, JSON.stringify(updatedArchives));
+
+      if (report.firebaseId) {
+        await deleteDoc(doc(db, "reports", report.firebaseId));
       }
+
+      const updatedPosts = posts.filter((p) => p.id !== reportId);
+      setPosts(updatedPosts);
+      localStorage.setItem(LS_POSTS, JSON.stringify(updatedPosts));
+
+      triggerToast("Report archived to Archived Reports ✅");
+    } catch (err) {
+      console.error("Failed to archive report:", err);
     }
+  };
 
-    const updatedArchives = archives.filter((a) => a.id !== archiveId);
-    setArchives(updatedArchives);
-    localStorage.setItem(LS_ARCHIVES, JSON.stringify(updatedArchives));
+  const restoreReport = async (archiveId) => {
+    try {
+      const archivedReport = archives.find((a) => a.id === archiveId);
+      if (!archivedReport) return;
 
-    const updatedPosts = [restoredReport, ...posts];
-    setPosts(updatedPosts);
-    localStorage.setItem(LS_POSTS, JSON.stringify(updatedPosts));
+      const restoredReport = { ...archivedReport };
+      delete restoredReport.deletedAt;
 
-    triggerToast("Report restored successfully ✅");
-  } catch (err) {
-    console.error("Failed to restore report:", err);
-  }
-};
+      try {
+        const newDocRef = await addDoc(collection(db, "reports"), restoredReport);
+        restoredReport.firebaseId = newDocRef.id;
+      } catch (err) {
+        console.error("Failed to restore report to Firebase:", err);
+      }
+
+      if (archivedReport.firebaseId) {
+        try {
+          await deleteDoc(doc(db, "archivedReports", archivedReport.firebaseId));
+        } catch (err) {
+          console.error("Failed to delete archived report from Firebase:", err);
+        }
+      }
+
+      const updatedArchives = archives.filter((a) => a.id !== archiveId);
+      setArchives(updatedArchives);
+      localStorage.setItem(LS_ARCHIVES, JSON.stringify(updatedArchives));
+
+      const updatedPosts = [restoredReport, ...posts];
+      setPosts(updatedPosts);
+      localStorage.setItem(LS_POSTS, JSON.stringify(updatedPosts));
+
+      triggerToast("Report restored successfully ✅");
+    } catch (err) {
+      console.error("Failed to restore report:", err);
+    }
+  };
 
   const filteredArchives = useMemo(() => {
     const now = new Date();
@@ -305,13 +329,12 @@ const restoreReport = async (archiveId) => {
   }, [archives, searchTerm, dateFilter]);
 
   const formatTimestamp = (timestamp) => {
-  if (!timestamp) return "—";
-  if (timestamp.seconds) {
-    return new Date(timestamp.seconds * 1000).toLocaleString();
-  }
-  return timestamp.toString();
-};
-
+    if (!timestamp) return "—";
+    if (timestamp.seconds) {
+      return new Date(timestamp.seconds * 1000).toLocaleString();
+    }
+    return timestamp.toString();
+  };
 
   return (
     <div className="min-h-screen bg-[var(--color-secondary)] text-[var(--color-text)]">

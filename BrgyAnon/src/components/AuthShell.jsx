@@ -1,4 +1,4 @@
-// AUTHSHELL.JSX
+// AuthShell.jsx
 import React, { useState } from "react";
 import { FaGoogle } from "react-icons/fa";
 import { motion, AnimatePresence } from "framer-motion";
@@ -13,13 +13,7 @@ import {
   linkWithCredential,
   createUserWithEmailAndPassword,
 } from "firebase/auth";
-import {
-  doc,
-  setDoc,
-  addDoc,
-  collection,
-  getDoc,
-} from "firebase/firestore";
+import { doc, setDoc, addDoc, collection, getDoc } from "firebase/firestore";
 import { FiEye, FiEyeOff } from "react-icons/fi";
 
 export default function AuthShell() {
@@ -46,7 +40,7 @@ export default function AuthShell() {
     }
 
     try {
-      // Check admin credentials first
+      // Check admin credentials
       const adminDocRef = doc(db, "admin", "admin");
       const adminSnap = await getDoc(adminDocRef);
 
@@ -79,11 +73,26 @@ export default function AuthShell() {
         return;
       }
 
-      await setDoc(
-        doc(db, "users", user.uid),
-        { email: user.email, userId: user.uid, lastLogin: serverTimestamp() },
-        { merge: true }
-      );
+      const userDocRef = doc(db, "users", user.uid);
+      const userSnap = await getDoc(userDocRef);
+
+      const userData = userSnap.exists() ? userSnap.data() : {};
+      const fullNameFromDB = userData.fullName || "No Name";
+
+      await setDoc(userDocRef, {
+        email: user.email,
+        userId: user.uid,
+        lastLogin: serverTimestamp(),
+      }, { merge: true });
+
+      // Save unified profile in localStorage
+      localStorage.setItem("brgy_profile_data", JSON.stringify({
+        loginType: "email",
+        fullName: fullNameFromDB,
+        email: user.email,
+        userId: user.uid,
+        lastLogin: new Date().toLocaleString(),
+      }));
 
       localStorage.removeItem("brgy_is_admin");
       navigate("/home");
@@ -107,6 +116,14 @@ export default function AuthShell() {
         userId: user.uid,
         createdAt: serverTimestamp(),
       });
+
+      localStorage.setItem("brgy_profile_data", JSON.stringify({
+        loginType: "created",
+        fullName: fullName || "No Name",
+        email: user.email,
+        userId: user.uid,
+        lastLogin: new Date().toLocaleString(),
+      }));
 
       navigate("../home");
     } catch (err) {
@@ -151,16 +168,20 @@ export default function AuthShell() {
         }
       }
 
-      await setDoc(
-        doc(db, "users", user.uid),
-        { fullName: user.displayName || "No Name", email: user.email, userId: user.uid, lastLogin: serverTimestamp() },
-        { merge: true }
-      );
-
-      localStorage.setItem("googlename", JSON.stringify({
-        fullName: user.displayName,
+      await setDoc(doc(db, "users", user.uid), {
+        fullName: user.displayName || "No Name",
         email: user.email,
         userId: user.uid,
+        lastLogin: serverTimestamp(),
+      }, { merge: true });
+
+      localStorage.setItem("brgy_profile_data", JSON.stringify({
+        loginType: "google",
+        googleName: user.displayName || "No Name",
+        email: user.email,
+        userId: user.uid,
+        profileImage: user.photoURL || "",
+        lastLogin: new Date().toLocaleString(),
       }));
 
       localStorage.removeItem("brgy_is_admin");
@@ -191,7 +212,14 @@ export default function AuthShell() {
         createdAt: serverTimestamp(),
       });
 
-      localStorage.setItem("guestUser", JSON.stringify({ fullName, purpose, guestId }));
+      localStorage.setItem("brgy_profile_data", JSON.stringify({
+        loginType: "guest",
+        guestName: fullName.trim(),
+        purpose: purpose.trim() || "",
+        userId: guestId,
+        lastLogin: new Date().toLocaleString(),
+      }));
+
       navigate("../home");
     } catch (err) {
       console.error("Guest login failed:", err);

@@ -9,7 +9,6 @@ import {
   FiCheck,
   FiX,
   FiEye,
-  FiRefreshCw,
   FiLogOut,
 } from "react-icons/fi";
 import { motion, AnimatePresence } from "framer-motion";
@@ -26,23 +25,31 @@ export const STATUSES = [
   "Rejected",
 ];
 
+
+
 const handleArchiveUser = async (user) => {
-  try {
-    // 🔹 I-save user data sa "archive"
-    await setDoc(doc(db, "archive", user.id), {
-      email: user.email || "",
-      name: user.name || "",
-      userId: user.id,
-      archivedAt: new Date()
+try {
+    // Step 1: Restore to active users
+    await setDoc(doc(db, "users", user.id), {
+      ...user,
+      restoredAt: serverTimestamp(),
+      isActive: true,
+      archived: false,
     });
 
-    // 🔹 Burahin sa "users" collection (optional)
-    await deleteDoc(doc(db, "users", user.id));
+    // Step 2: Delete from archive
+    await deleteDoc(doc(db, "archiveUsers", user.id));
 
-    alert("✅ User archived successfully!");
-  } catch (err) {
-    console.error("❌ Error archiving user:", err);
-    alert("Failed to archive user.");
+    showNotification(`${user.displayName || "User"} restored successfully!`);
+
+    // Step 3: Update UI
+    setArchivedUsers((prev) => prev.filter((u) => u.id !== user.id));
+    setUsers((prev) => [
+      ...prev.filter((u) => u.id !== user.id),
+      { ...user, isActive: true },
+    ]);
+  } catch (error) {
+    console.error("Error restoring user:", error);
   }
 };
 
@@ -59,6 +66,8 @@ function normalizeStatus(s) {
 
 export default function Admin() {
   const navigate = useNavigate();
+const [users, setUsers] = useState([]);
+const [archivedUsers, setArchivedUsers] = useState([]);
 
   const [posts, setPosts] = useState([]);
   const [query, setQuery] = useState("");
@@ -71,23 +80,41 @@ export default function Admin() {
   const [rejectReason, setRejectReason] = useState("");
 
   // Load posts
-  const load = useCallback(() => {
+ const load = useCallback(() => {
     try {
-      const raw = JSON.parse(localStorage.getItem(LS_POSTS) || "[]");
-      const shaped = (Array.isArray(raw) ? raw : []).map((p) => ({
+      const raw = localStorage.getItem(LS_POSTS);
+      if (!raw) {
+        setPosts([]);
+        return;
+      }
+
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) {
+        setPosts([]);
+        return;
+      }
+
+      const shaped = parsed.map((p) => ({
         ...p,
-        // always normalize/fallback to Awaiting
-        status: normalizeStatus(p.status),
+        status: normalizeStatus(p.status || "Awaiting Approval"),
       }));
+
       setPosts(
-        shaped.sort(
-          (a, b) => Number(b?.createdAt || 0) - Number(a?.createdAt || 0)
-        )
+        shaped.sort((a, b) => Number(b?.createdAt || 0) - Number(a?.createdAt || 0))
       );
-    } catch {
+    } catch (err) {
+      console.error("Error loading posts:", err);
       setPosts([]);
     }
   }, []);
+
+  useEffect(() => {
+  const isAdmin = localStorage.getItem(LS_IS_ADMIN) === "true";
+  if (!isAdmin) {
+    navigate("/login", { replace: true });
+  }
+}, [navigate]);
+
 
   useEffect(() => {
     load();
@@ -98,10 +125,11 @@ export default function Admin() {
 
   // Persist
   const persist = (next) => {
-    localStorage.setItem(LS_POSTS, JSON.stringify(next));
-    setPosts(
-      next.sort((a, b) => Number(b?.createdAt || 0) - Number(a?.createdAt || 0))
+    const sorted = next.sort(
+      (a, b) => Number(b?.createdAt || 0) - Number(a?.createdAt || 0)
     );
+    localStorage.setItem(LS_POSTS, JSON.stringify(sorted));
+    setPosts(sorted);
   };
 
   // Counts
@@ -157,7 +185,8 @@ export default function Admin() {
     persist(next);
   };
 
-  const acceptReport = (id) => setStatus(id, "Received");
+   const acceptReport = (id) => setStatus(id, "Received");
+  const markResolved = (id) => setStatus(id, "Resolved");
 
   const rejectReport = (post, reason) => {
     const next = posts.map((p) =>
@@ -182,9 +211,9 @@ export default function Admin() {
     navigate("/login", { replace: true });
   }
 
-  return (
+    return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-900 to-slate-800 text-slate-100">
-      {/* Header */}
+      {/* HEADER */}
       <header className="sticky top-0 z-20 backdrop-blur bg-slate-900/80 border-b border-white/10">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -209,12 +238,6 @@ export default function Admin() {
                 className="w-64 rounded-xl bg-white/5 text-white placeholder-white/40 px-9 py-2 outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-emerald-400/60"
               />
             </div>
-            <button
-              onClick={load}
-              className="inline-flex items-center gap-2 rounded-xl px-3 py-2 bg-white/5 ring-1 ring-white/10 hover:bg-white/10"
-            >
-              <FiRefreshCw /> Refresh
-            </button>
             <button
               onClick={() => setShowLogout(true)}
               className="inline-flex items-center gap-2 rounded-xl px-3 py-2 font-semibold bg-amber-400 text-slate-900 hover:bg-amber-300"
@@ -330,6 +353,7 @@ export default function Admin() {
                   onAccept={() => acceptReport(p.id)}
                   onReject={() => setRejecting(p)}
                   onUpdate={(status) => setStatus(p.id, status)}
+                  onResolved={() => markResolved(p.id)}
                   onView={() => setDetails(p)}
                 />
               ))}
@@ -338,96 +362,7 @@ export default function Admin() {
         </main>
       </div>
 
-      {/* Details Modal */}
-      {details && (
-        <Modal onClose={() => setDetails(null)} title="Report Details">
-          <div className="space-y-3">
-            <h3 className="text-lg font-semibold text-emerald-400">
-              {details.issue}
-            </h3>
-            <div className="text-sm text-slate-300 flex items-center gap-1">
-              <FiMapPin className="opacity-70" /> {details.location}
-            </div>
-            <div className="text-xs text-slate-400 flex items-center gap-1">
-              <FiClock className="opacity-70" />{" "}
-              {new Date(details.createdAt).toLocaleString()}
-            </div>
-            <StatusBadge status={normalizeStatus(details.status)} />
-            {details.desc && (
-              <p className="text-sm text-slate-200">{details.desc}</p>
-            )}
-            {details.imageUrl && (
-              <img
-                src={details.imageUrl}
-                alt="attachment"
-                className="mt-2 w-full max-h-80 object-cover rounded-xl ring-1 ring-white/10"
-              />
-            )}
-            {details.status === "Rejected" && details.rejectionReason && (
-              <p className="mt-2 text-sm text-rose-400">
-                Reason: {details.rejectionReason}
-              </p>
-            )}
-          </div>
-        </Modal>
-      )}
-
-      {/* Reject Modal */}
-      <AnimatePresence>
-        {rejecting && (
-          <motion.div
-            className="fixed inset-0 z-50 flex items-center justify-center p-4"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-          >
-            <div
-              className="absolute inset-0 bg-black/60"
-              onClick={() => setRejecting(null)}
-            />
-            <motion.div
-              className="relative z-10 w-full max-w-md rounded-2xl bg-slate-900 text-slate-100 p-6"
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-            >
-              <h3 className="text-lg font-semibold text-rose-400">
-                Reject Report
-              </h3>
-              <p className="mt-2 text-sm text-slate-300">
-                Provide a reason for rejecting <b>{rejecting.issue}</b>:
-              </p>
-              <textarea
-                value={rejectReason}
-                onChange={(e) => setRejectReason(e.target.value)}
-                rows={3}
-                className="mt-3 w-full rounded-xl bg-slate-800 text-slate-100 px-3 py-2 outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-rose-400"
-                placeholder="e.g., Duplicate report, not a barangay issue..."
-              />
-              <div className="mt-4 flex justify-end gap-3">
-                <button
-                  onClick={() => setRejecting(null)}
-                  className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={() => {
-                    rejectReport(rejecting, rejectReason || "No reason given");
-                    setRejecting(null);
-                    setRejectReason("");
-                  }}
-                  className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700"
-                >
-                  Reject
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Logout Modal */}
+    {/* ✅ LOGOUT MODAL FIXED */}
       <AnimatePresence>
         {showLogout && (
           <motion.div
@@ -491,13 +426,11 @@ function SideLink({ children, active, onClick }) {
   );
 }
 
-function StatCard({ label, value, grad, textDark = false }) {
+function StatCard({ label, value, grad }) {
   return (
     <div className="h-32 rounded-2xl overflow-hidden ring-1 ring-white/10 bg-white/5 flex">
       <div
-        className={`flex flex-col justify-center px-6 w-full bg-gradient-to-r ${grad} ${
-          textDark ? "text-slate-900" : "text-white"
-        }`}
+        className={`flex flex-col justify-center px-6 w-full bg-gradient-to-r ${grad} text-slate-900`}
       >
         <div className="text-4xl font-extrabold">{value}</div>
         <div className="mt-1 text-lg font-medium">{label}</div>
@@ -506,30 +439,27 @@ function StatCard({ label, value, grad, textDark = false }) {
   );
 }
 
-function ReportRow({ post, onAccept, onReject, onUpdate, onView }) {
+function ReportRow({ post, onAccept, onReject, onUpdate, onResolved, onView }) {
   const current = normalizeStatus(post.status);
   const [nextStatus, setNextStatus] = useState(current);
   const awaiting = current === "Awaiting Approval";
+  const inProgress = current === "In Progress";
+  const resolved = current === "Resolved";
   const unchanged = nextStatus === current;
 
   return (
     <article className="rounded-2xl bg-white ring-1 ring-black/10 p-4">
       <div className="flex flex-col gap-3 md:flex-row md:justify-between">
-        <div className="min-w-0">
+        {/* Left info */}
+        <div>
           <h3 className="text-lg font-bold text-slate-900">{post.issue}</h3>
           {post.location && (
             <div className="text-sm text-slate-600 flex items-center gap-1">
-              <FiMapPin className="opacity-70" />
-              {post.location}
+              <FiMapPin className="opacity-70" /> {post.location}
             </div>
           )}
-          {post.desc && (
-            <p className="mt-1 text-sm text-slate-800 line-clamp-2">
-              {post.desc}
-            </p>
-          )}
           <div className="mt-1 text-xs text-slate-500 flex items-center gap-1">
-            <FiClock className="opacity-70" />
+            <FiClock className="opacity-70" />{" "}
             {new Date(post.createdAt).toLocaleString()}
           </div>
           <div className="mt-2">
@@ -538,33 +468,51 @@ function ReportRow({ post, onAccept, onReject, onUpdate, onView }) {
           </div>
         </div>
 
+        {/* Right side actions */}
         <div className="flex flex-wrap items-center gap-2 md:justify-end">
           {awaiting ? (
             <>
               <button
                 onClick={onAccept}
-                className="inline-flex items-center gap-2 w-30 px-5  py-2 rounded-xl bg-emerald-600 text-white hover:bg-emerald-700"
+                className="inline-flex items-center gap-2 w-24 justify-center px-3 py-2 rounded-xl bg-emerald-600 text-white hover:bg-emerald-700"
               >
                 <FiCheck /> Accept
               </button>
               <button
                 onClick={onReject}
-                className="inline-flex items-center gap-2 w-30 px-5 py-2 rounded-xl bg-rose-600 text-white hover:bg-rose-700"
+                className="inline-flex items-center gap-2 w-24 justify-center px-3 py-2 rounded-xl bg-rose-600 text-white hover:bg-rose-700"
               >
                 <FiX /> Reject
               </button>
             </>
+          ) : inProgress ? (
+            <>
+              <button
+                onClick={onResolved}
+                className="px-5 py-2 rounded-xl bg-slate-600 text-white hover:bg-slate-700"
+              >
+                ✅ Mark as Resolved
+              </button>
+              <button
+                onClick={onView}
+                className="inline-flex gap-2 w-24 justify-center px-3 py-2 rounded-xl bg-violet-600 text-white hover:bg-violet-700"
+              >
+                <FiEye /> View
+              </button>
+            </>
+          ) : resolved ? (
+            <div className="text-center text-sm text-slate-600 font-medium bg-slate-100 rounded-xl px-4 py-2">
+              🟢 This report is Resolved
+            </div>
           ) : (
             <>
               <div className="relative">
                 <select
                   value={nextStatus}
                   onChange={(e) => setNextStatus(e.target.value)}
-                  className="w-44 sm:w-52 cursor-pointer rounded-xl bg-white text-slate-900
-                             pr-9 pl-3 py-2 text-sm ring-1 ring-slate-300
-                             outline-none focus:ring-2 focus:ring-emerald-400"
+                  className="w-44 rounded-xl bg-white text-slate-900 pr-9 pl-3 py-2 text-sm ring-1 ring-slate-300 outline-none focus:ring-2 focus:ring-emerald-400"
                 >
-                  {["Received", "In Progress", "Resolved"].map((s) => (
+                  {["Received", "In Progress"].map((s) => (
                     <option key={s} value={s}>
                       {s}
                     </option>
@@ -572,25 +520,21 @@ function ReportRow({ post, onAccept, onReject, onUpdate, onView }) {
                 </select>
                 <FiChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-slate-500" />
               </div>
-
               <button
                 onClick={() => !unchanged && onUpdate(nextStatus)}
                 disabled={unchanged}
-                className="inline-flex items-center gap-2 rounded-xl px-3 py-2 font-semibold
-                           bg-indigo-600 text-white hover:bg-indigo-700
-                           disabled:opacity-50 disabled:cursor-not-allowed"
+                className="px-3 py-2 rounded-xl font-semibold bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
               >
                 Update
               </button>
+              <button
+                onClick={onView}
+                className="inline-flex gap-2 w-24 justify-center px-3 py-2 rounded-xl bg-violet-600 text-white hover:bg-violet-700"
+              >
+                <FiEye /> View
+              </button>
             </>
           )}
-
-          <button
-            onClick={onView}
-            className="inline-flex items-center gap-2 rounded-xl px-3 py-2 font-semibold bg-violet-600 text-white hover:bg-violet-700"
-          >
-            <FiEye /> View Details
-          </button>
         </div>
       </div>
     </article>
@@ -606,16 +550,7 @@ function StatusBadge({ status, lightCard = false }) {
     Resolved: "bg-slate-100 text-slate-800 ring-slate-300",
     Rejected: "bg-rose-50 text-rose-800 ring-rose-200",
   };
-  const mapDark = {
-    "Awaiting Approval": "bg-amber-400/20 text-amber-200 ring-amber-300/30",
-    Received: "bg-indigo-400/20 text-indigo-200 ring-indigo-300/30",
-    "In Progress": "bg-emerald-400/20 text-emerald-200 ring-emerald-300/30",
-    Resolved: "bg-slate-400/20 text-slate-200 ring-slate-300/30",
-    Rejected: "bg-rose-400/20 text-rose-200 ring-rose-300/30",
-  };
-  const cls =
-    (lightCard ? mapLight : mapDark)[s] ||
-    "bg-white/10 text-white/70 ring-white/10";
+  const cls = mapLight[s] || "bg-white/10 text-white/70 ring-white/10";
   const dot =
     s === "Awaiting Approval"
       ? "bg-amber-400"
@@ -634,28 +569,5 @@ function StatusBadge({ status, lightCard = false }) {
       <span className={`h-2 w-2 rounded-full ${dot}`} />
       {s}
     </span>
-  );
-}
-
-function Modal({ title, children, onClose }) {
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div
-        className="absolute inset-0 bg-black/60 backdrop-blur-[2px]"
-        onClick={onClose}
-      />
-      <div className="relative z-10 w-full max-w-2xl rounded-2xl bg-slate-900 text-slate-100 ring-1 ring-white/10 shadow-2xl">
-        <div className="px-5 py-4 border-b border-white/10 flex items-center justify-between">
-          <h3 className="font-semibold text-emerald-400">{title}</h3>
-          <button
-            onClick={onClose}
-            className="h-9 w-9 grid place-items-center rounded-xl hover:bg-white/10"
-          >
-            <FiX />
-          </button>
-        </div>
-        <div className="p-5">{children}</div>
-      </div>
-    </div>
   );
 }

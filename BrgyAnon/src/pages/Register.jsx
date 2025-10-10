@@ -6,7 +6,7 @@ import { auth, db, serverTimestamp } from "../firebase";
 import { createUserWithEmailAndPassword, updateProfile } from "firebase/auth";
 import { doc, setDoc } from "firebase/firestore";
 
-export default function Register() {
+export default function Register({ setProfile }) { // <-- receive setProfile from parent
   const navigate = useNavigate();
 
   const [form, setForm] = useState({
@@ -62,6 +62,7 @@ export default function Register() {
     setTouched({
       firstName: true,
       lastName: true,
+      email: true,
       password: true,
       confirmPassword: true,
       agree: true,
@@ -69,6 +70,7 @@ export default function Register() {
     if (!canSubmit) return;
 
     try {
+      // 1️⃣ Create user in Firebase Auth
       const userCredential = await createUserWithEmailAndPassword(
         auth,
         form.email,
@@ -76,18 +78,37 @@ export default function Register() {
       );
       const user = userCredential.user;
 
-      await updateProfile(user, {
-        displayName: `${form.firstName} ${form.lastName}`,
-      });
+      // 2️⃣ Construct full name
+      const fullName = `${form.firstName} ${form.middleName} ${form.lastName}`.trim();
 
+      // 3️⃣ Update Firebase Auth displayName
+      await updateProfile(user, { displayName: fullName });
+
+      // 4️⃣ Save to Firestore
       await setDoc(doc(db, "users", user.uid), {
         firstName: form.firstName,
         middleName: form.middleName,
         lastName: form.lastName,
         email: form.email,
-        username: `${form.firstName}${form.lastName}`.toLowerCase(),
+        fullName,
+        loginType: "created",
         createdAt: serverTimestamp(),
       });
+
+      // 5️⃣ Save profile in localStorage
+      const updatedProfile = {
+        firstName: form.firstName,
+        middleName: form.middleName,
+        lastName: form.lastName,
+        email: form.email,
+        fullName,
+        loginType: "created",
+        lastLogin: new Date().toLocaleString(),
+      };
+      localStorage.setItem("LS_PROFILE", JSON.stringify(updatedProfile));
+
+      // 6️⃣ Update app state (so displayName works immediately)
+      if (setProfile) setProfile(updatedProfile);
 
       alert("Account created successfully!");
       navigate("/login");
@@ -116,12 +137,8 @@ export default function Register() {
         {/* Form */}
         <form onSubmit={onSubmit} className="p-4">
           <div className="row g-3">
-            {/* First Name */}
             <div className="col-sm-4">
-              <Field
-                label="First name *"
-                error={touched.firstName && !form.firstName.trim()}
-              >
+              <Field label="First name *" error={touched.firstName && !form.firstName.trim()}>
                 <Input
                   icon={<FiUser />}
                   id="firstName"
@@ -133,8 +150,6 @@ export default function Register() {
                 />
               </Field>
             </div>
-
-            {/* Middle Name */}
             <div className="col-sm-4">
               <Field label="Middle name">
                 <Input
@@ -148,13 +163,8 @@ export default function Register() {
                 />
               </Field>
             </div>
-
-            {/* Last Name */}
             <div className="col-sm-4">
-              <Field
-                label="Last name *"
-                error={touched.lastName && !form.lastName.trim()}
-              >
+              <Field label="Last name *" error={touched.lastName && !form.lastName.trim()}>
                 <Input
                   icon={<FiUser />}
                   id="lastName"
@@ -168,12 +178,7 @@ export default function Register() {
             </div>
           </div>
 
-          {/* Email */}
-          <Field
-            label="Email *"
-            hint={touched.email && !emailOk ? "Enter a valid email." : ""}
-            error={touched.email && !emailOk}
-          >
+          <Field label="Email *" hint={touched.email && !emailOk ? "Enter a valid email." : ""} error={touched.email && !emailOk}>
             <Input
               icon={<FiMail />}
               id="email"
@@ -186,17 +191,11 @@ export default function Register() {
             />
           </Field>
 
-          {/* Passwords */}
           <div className="row g-3">
-            {/* Password */}
             <div className="col-sm-6">
               <Field
                 label="Password *"
-                hint={
-                  touched.password && form.password.length < 8
-                    ? "Use at least 8 characters."
-                    : ""
-                }
+                hint={touched.password && form.password.length < 8 ? "Use at least 8 characters." : ""}
                 error={touched.password && form.password.length < 8}
               >
                 <Input
@@ -224,15 +223,10 @@ export default function Register() {
               </Field>
             </div>
 
-            {/* Confirm Password */}
             <div className="col-sm-6">
               <Field
                 label="Confirm password *"
-                hint={
-                  touched.confirmPassword && !passwordsMatch
-                    ? "Passwords must match."
-                    : ""
-                }
+                hint={touched.confirmPassword && !passwordsMatch ? "Passwords must match." : ""}
                 error={touched.confirmPassword && !passwordsMatch}
               >
                 <Input
@@ -248,15 +242,9 @@ export default function Register() {
                     <button
                       type="button"
                       className="btn position-absolute top-50 end-0 translate-middle-y p-2 text-black-50"
-                      style={{
-                        border: "none",
-                        background: "transparent",
-                        borderRadius: "0 0.5rem 0.5rem 0",
-                      }}
+                      style={{ border: "none", background: "transparent", borderRadius: "0 0.5rem 0.5rem 0" }}
                       onClick={() => setShowConfirmPwd((s) => !s)}
-                      aria-label={
-                        showConfirmPwd ? "Hide password" : "Show password"
-                      }
+                      aria-label={showConfirmPwd ? "Hide password" : "Show password"}
                     >
                       {showConfirmPwd ? <FiEyeOff /> : <FiEye />}
                     </button>
@@ -266,7 +254,6 @@ export default function Register() {
             </div>
           </div>
 
-          {/* Terms */}
           <div className="form-check mt-3">
             <input
               id="agree"
@@ -279,47 +266,23 @@ export default function Register() {
             />
             <label htmlFor="agree" className="form-check-label small">
               I agree to the{" "}
-              <a
-                className="text-decoration-none text-primary"
-                href="#"
-              >
-                Terms
-              </a>{" "}
-              and{" "}
-              <a
-                className="text-decoration-none text-primary"
-                href="#"
-              >
-                Privacy Policy
-              </a>
-              .
+              <a className="text-decoration-none text-primary" href="#">Terms</a> and{" "}
+              <a className="text-decoration-none text-primary" href="#">Privacy Policy</a>.
             </label>
           </div>
-          {touched.agree && !form.agree && (
-            <p className="text-danger small mt-1">
-              Please accept the terms to continue.
-            </p>
-          )}
+          {touched.agree && !form.agree && <p className="text-danger small mt-1">Please accept the terms to continue.</p>}
 
-          {/* Submit */}
           <button
             type="submit"
             disabled={!canSubmit}
-            className={`btn w-100 mt-3 py-2 fw-semibold rounded-pill ${
-              canSubmit
-                ? "bg-success text-white border-0"
-                : "bg-light text-secondary border-0 opacity-75"
-            }`}
+            className={`btn w-100 mt-3 py-2 fw-semibold rounded-pill ${canSubmit ? "bg-success text-white border-0" : "bg-light text-secondary border-0 opacity-75"}`}
           >
             CREATE ACCOUNT
           </button>
 
-          {/* Bottom helper */}
           <p className="text-center small mt-3 mb-0 text-muted">
             Already have an account?{" "}
-            <Link to="/login" className="text-primary text-decoration-none">
-              Log in
-            </Link>
+            <Link to="/login" className="text-primary text-decoration-none">Log in</Link>
           </p>
         </form>
       </div>
@@ -328,7 +291,6 @@ export default function Register() {
 }
 
 /* -------- Reusable UI -------- */
-
 function Field({ label, error, hint, children }) {
   return (
     <div className="mb-2">
@@ -346,15 +308,8 @@ function Field({ label, error, hint, children }) {
 function Input({ icon, trailing, className = "", ...props }) {
   return (
     <div className="position-relative">
-      {icon && (
-        <span className="position-absolute top-50 start-0 translate-middle-y ms-3 text-muted">
-          {icon}
-        </span>
-      )}
-      <input
-        {...props}
-        className={`form-control ps-${icon ? "5" : "3"} pe-${trailing ? "5" : "3"} rounded-3 ${className}`}
-      />
+      {icon && <span className="position-absolute top-50 start-0 translate-middle-y ms-3 text-muted">{icon}</span>}
+      <input {...props} className={`form-control ps-${icon ? "5" : "3"} pe-${trailing ? "5" : "3"} rounded-3 ${className}`} />
       {trailing}
     </div>
   );
@@ -363,26 +318,15 @@ function Input({ icon, trailing, className = "", ...props }) {
 function PasswordMeter({ score }) {
   const segments = 5;
   const label =
-    score <= 1
-      ? "Very weak"
-      : score === 2
-      ? "Weak"
-      : score === 3
-      ? "Fair"
-      : score === 4
-      ? "Strong"
-      : "Very strong";
+    score <= 1 ? "Very weak" :
+    score === 2 ? "Weak" :
+    score === 3 ? "Fair" :
+    score === 4 ? "Strong" : "Very strong";
   return (
     <div className="mt-2">
       <div className="d-flex gap-1">
         {Array.from({ length: segments }).map((_, i) => (
-          <div
-            key={i}
-            className={`flex-grow-1 rounded-pill ${
-              i < score ? "bg-primary" : "bg-light border"
-            }`}
-            style={{ height: "5px" }}
-          ></div>
+          <div key={i} className={`flex-grow-1 rounded-pill ${i < score ? "bg-primary" : "bg-light border"}`} style={{ height: "5px" }}></div>
         ))}
       </div>
       <p className="small text-muted mt-1">{label}</p>
