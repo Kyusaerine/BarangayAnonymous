@@ -1,3 +1,4 @@
+// src/pages/Archive.jsx
 import React, { useEffect, useState } from "react";
 import {
   collection,
@@ -31,38 +32,47 @@ const Archive = () => {
     setTimeout(() => setNotif(""), 3000);
   };
 
-  // Real-time listeners
+  // 🔹 Real-time listeners for users, archiveUsers, and archivedReports
   useEffect(() => {
     const unsubUsers = onSnapshot(collection(db, "users"), (snapshot) => {
       const data = snapshot.docs.map((d) => ({ id: d.id, ...d.data(), isProcessing: false }));
       const filtered = data.filter(
         (u) =>
-          !(u.email?.toLowerCase().includes("guest") ||
-            u.displayName?.toLowerCase().includes("guest"))
+          u.isActive !== false &&
+          !(
+            u.email?.toLowerCase().includes("guest") ||
+            u.displayName?.toLowerCase().includes("guest")
+          )
       );
       setUsers(filtered);
     });
 
-    const unsubArchivedUsers = onSnapshot(
-      collection(db, "archiveUsers"),
-      (snapshot) => {
-        const data = snapshot.docs.map((d) => ({ id: d.id, ...d.data(), isProcessing: false }));
-        const filtered = data.filter(
-          (u) =>
-            !(u.email?.toLowerCase().includes("guest") ||
-              u.displayName?.toLowerCase().includes("guest"))
-        );
-        setArchivedUsers(filtered);
-      }
-    );
+    const unsubArchivedUsers = onSnapshot(collection(db, "archiveUsers"), (snapshot) => {
+      const data = snapshot.docs.map((d) => ({ id: d.id, ...d.data(), isProcessing: false }));
+      const filtered = data.filter(
+        (u) =>
+          u.isActive === false &&
+          !(
+            u.email?.toLowerCase().includes("guest") ||
+            u.displayName?.toLowerCase().includes("guest")
+          )
+      );
+      setArchivedUsers(filtered);
+    });
 
-    const unsubArchivedReports = onSnapshot(
-      collection(db, "archivedReports"),
-      (snapshot) => {
-        const data = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
-        setArchivedReports(data);
-      }
-    );
+    const unsubArchivedReports = onSnapshot(collection(db, "archivedReports"), (snapshot) => {
+      const data = snapshot.docs
+        .map((d) => ({ id: d.id, ...d.data() }))
+        .filter(
+          (r) =>
+            r.deletedBy ||
+            r.deletedByName ||
+            r.reportedBy ||
+            r.reportedByName ||
+            r.userName
+        );
+      setArchivedReports(data);
+    });
 
     return () => {
       unsubUsers();
@@ -71,48 +81,63 @@ const Archive = () => {
     };
   }, []);
 
-// Deactivate user completely
-const handleDeactivate = async (user) => {
-  try {
-    const archivedUserRef = doc(db, "archiveUsers", user.id);
-    const activeUserRef = doc(db, "users", user.id);
+  // 🔹 Deactivate user (move to archiveUsers)
+  const handleDeactivate = async (user) => {
+    try {
+      const archivedUserRef = doc(db, "archiveUsers", user.id);
+      const activeUserRef = doc(db, "users", user.id);
 
-    // Step 1: Move user to archive
-    await setDoc(archivedUserRef, {
-      ...user,
-      archivedAt: serverTimestamp(),
-      isActive: false,
-      archived: true,
-    });
+      // Move to archiveUsers
+      await setDoc(archivedUserRef, {
+        ...user,
+        archivedAt: serverTimestamp(),
+        isActive: false,
+        archived: true,
+        deactivatedByAdmin: true,
+      });
 
-    // Step 2: Delete user from "users"
-    await deleteDoc(activeUserRef);
+      // Remove from active users
+      await deleteDoc(activeUserRef);
 
-    showNotification(`${user.displayName || "User"} deactivated successfully!`);
+      // UI updates instantly
+      setUsers((prev) => prev.filter((u) => u.id !== user.id));
+      setArchivedUsers((prev) => [
+        ...prev,
+        { ...user, archivedAt: new Date(), isActive: false },
+      ]);
 
-    // Step 3: Update UI instantly
-    setUsers((prev) => prev.filter((u) => u.id !== user.id));
-    setArchivedUsers((prev) => [
-      ...prev.filter((u) => u.id !== user.id),
-      { ...user, archivedAt: new Date(), isActive: false },
-    ]);
-  } catch (error) {
-    console.error("Error deactivating user:", error);
-  }
-};
+      showNotification(`${user.displayName || "User"} permanently deactivated!`);
+    } catch (error) {
+      console.error("Error deactivating user:", error);
+    }
+  };
 
-  // Restore user
+  // 🔹 Restore user (move back to users)
   const handleRestoreUser = async (user) => {
     if (user.isProcessing) return;
     user.isProcessing = true;
     try {
-      await setDoc(doc(db, "users", user.id), {
+      const userRef = doc(db, "users", user.id);
+      const archiveRef = doc(db, "archiveUsers", user.id);
+
+      // Restore user
+      await setDoc(userRef, {
         ...user,
         restoredAt: serverTimestamp(),
         isActive: true,
+        archived: false,
       });
-      await deleteDoc(doc(db, "archiveUsers", user.id));
-      showNotification("User reactivated successfully!");
+
+      // Remove from archiveUsers
+      await deleteDoc(archiveRef);
+
+      setArchivedUsers((prev) => prev.filter((u) => u.id !== user.id));
+      setUsers((prev) => [
+        ...prev,
+        { ...user, restoredAt: new Date(), isActive: true },
+      ]);
+
+      showNotification("User restored successfully!");
     } catch (error) {
       console.error("Error restoring user:", error);
     } finally {
@@ -120,7 +145,7 @@ const handleDeactivate = async (user) => {
     }
   };
 
-  // Restore report
+  // 🔹 Restore report
   const handleRestoreReport = async (report) => {
     if (report.isProcessing) return;
     report.isProcessing = true;
@@ -130,6 +155,7 @@ const handleDeactivate = async (user) => {
         restoredAt: serverTimestamp(),
       });
       await deleteDoc(doc(db, "archivedReports", report.id));
+      setArchivedReports((prev) => prev.filter((r) => r.id !== report.id));
       showNotification("Report restored successfully!");
     } catch (error) {
       console.error("Error restoring report:", error);
@@ -145,6 +171,7 @@ const handleDeactivate = async (user) => {
       : new Date(timestamp).toLocaleString();
   };
 
+  // 🔹 UI (unchanged)
   return (
     <div className="container-fluid p-0 m-0">
       <div className="d-flex flex-nowrap bg-light min-vh-100">
@@ -243,9 +270,8 @@ const handleDeactivate = async (user) => {
             </div>
           )}
 
-          {/* Content */}
+          {/* Active Users */}
           <div className="container-fluid px-4 pt-5 mt-4">
-            {/* Active Users */}
             {activeTab === "active" && (
               <div className="card shadow border-0 rounded-4">
                 <div className="card-body">
@@ -382,10 +408,12 @@ const handleDeactivate = async (user) => {
                               <td>{report.id}</td>
                               <td>{report.issue || "Issue"}</td>
                               <td>
-                                {report.reportedBy?.email ||
-                                report.reportedBy?.name ||
-                                report.reportedBy?.displayName ||
-                                "Unknown"}
+                                {report.reportedByName ||
+                                  report.userName ||
+                                  report.reportedBy?.displayName ||
+                                  report.reportedBy?.name ||
+                                  report.reportedBy?.email ||
+                                  "Unknown"}
                               </td>
                               <td className="text-muted small">
                                 {formatTimestamp(report.archivedAt)}
@@ -403,7 +431,6 @@ const handleDeactivate = async (user) => {
                           ))
                         )}
                       </tbody>
-
                     </table>
                   </div>
                 </div>

@@ -8,7 +8,7 @@ import Profile from "./pages/Profile.jsx";
 import Reportfeed from "./pages/Reportfeed.jsx";
 import Register from "./pages/Register.jsx"; 
 import Admin from "./pages/Admin.jsx";
-import Archive from "./pages/Archive.jsx"
+import Archive from "./pages/Archive.jsx";
 import Logout from "./pages/Logout";
 
 export default function App() {
@@ -29,6 +29,7 @@ export default function App() {
       <Route path="/reportfeed" element={<Reportfeed />} />
       <Route path="/admin" element={<Admin />} />
       <Route path="/archive" element={<Archive />} />
+
     </Routes>
   );
 }

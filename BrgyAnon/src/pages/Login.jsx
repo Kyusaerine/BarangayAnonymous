@@ -1,5 +1,4 @@
-// Login.jsx
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { FaGoogle } from "react-icons/fa";
 import { FiEye, FiEyeOff } from "react-icons/fi";
 import { useNavigate } from "react-router-dom";
@@ -10,73 +9,108 @@ import {
   signInWithPopup,
   fetchSignInMethodsForEmail,
   sendPasswordResetEmail,
+  signOut,
 } from "firebase/auth";
-import { doc, setDoc, getDoc, collection, addDoc } from "firebase/firestore";
+import {
+  doc,
+  getDoc,
+  setDoc,
+  collection,
+  addDoc,
+  query,
+  where,
+  getDocs,
+} from "firebase/firestore";
 
 export default function Login() {
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [error, setError] = useState("");
-  const [resetMessage, setResetMessage] = useState("");
+  const [notification, setNotification] = useState(""); // ✅ For alert message
+  const [notificationType, setNotificationType] = useState("danger"); // "success" | "danger"
   const [guestNameError, setGuestNameError] = useState("");
-  const [notification, setNotification] = useState("");
+  const [resetMessage, setResetMessage] = useState("");
   const navigate = useNavigate();
 
-  // 🔹 Check if email is registered with Google
-  const checkSignInMethod = async (email) => {
-    try {
-      const methods = await fetchSignInMethodsForEmail(auth, email);
-      if (methods.includes("google.com") && !methods.includes("password")) {
-        alert("This email is registered via Google Sign-In. Please use Google button.");
-      }
-    } catch (err) {
-      console.error(err);
+  // 🕒 Auto-hide alert after 10 seconds
+  useEffect(() => {
+    if (notification) {
+      const timer = setTimeout(() => setNotification(""), 10000);
+      return () => clearTimeout(timer);
     }
-  };
+  }, [notification]);
 
-  // 🔹 Email/password login
+  // ✅ EMAIL LOGIN
   const handleLogin = async (e) => {
     e.preventDefault();
-    window.localStorage.setItem("isLogedIn", true)
-    if (!email.trim() || !password.trim()) {
-      setNotification("Please enter email and password");
+    setNotification("");
+
+    if (!email || !password) {
+      setNotification("Please enter both email and password.");
+      setNotificationType("warning");
       return;
     }
 
     try {
+      // 🔹 Check if user is archived BEFORE authentication
+      const archivedQuery = query(
+        collection(db, "archiveUsers"),
+        where("email", "==", email.trim())
+      );
+      const archivedSnap = await getDocs(archivedQuery);
+
+      if (!archivedSnap.empty) {
+        setNotification(
+          "⚠️ Your account has been deactivated. Please contact the admin."
+        );
+        setNotificationType("danger");
+        return; // ⛔ stop login
+      }
+
+      // 🔹 Admin Login
       const adminSnap = await getDoc(doc(db, "admin", "admin"));
       if (adminSnap.exists()) {
-        const adminData = adminSnap.data();
-        if (email.trim() === adminData.email && password === adminData.password) {
-          await setDoc(doc(db, "admin", "admin"), { lastLogin: serverTimestamp() }, { merge: true });
+        const admin = adminSnap.data();
+        if (email === admin.email && password === admin.password) {
+          await setDoc(
+            doc(db, "admin", "admin"),
+            { lastLogin: serverTimestamp() },
+            { merge: true }
+          );
           localStorage.setItem("brgy_is_admin", "true");
           navigate("/admin");
-          return;
-        } else if (email.trim() === adminData.email) {
-          setNotification("Invalid admin password");
           return;
         }
       }
 
-      const userCredential = await signInWithEmailAndPassword(auth, email, password);
-      const user = userCredential.user;
+      // 🔹 Regular user login
+      const cred = await signInWithEmailAndPassword(auth, email, password);
+      const user = cred.user;
 
-      const archivedSnap = await getDoc(doc(db, "archive", user.uid));
-      if (archivedSnap.exists()) {
-        alert("Your account has been deactivated. Please contact admin.");
-        await auth.signOut();
+      const userRef = doc(db, "users", user.uid);
+      const userSnap = await getDoc(userRef);
+
+      if (userSnap.exists() && userSnap.data().isActive === false) {
+        await signOut(auth);
+        setNotification(
+          "⚠️ Your account has been deactivated. Please contact the admin."
+        );
+        setNotificationType("danger");
         return;
       }
 
       await setDoc(
-        doc(db, "users", user.uid),
-        { email: user.email, userId: user.uid, lastLogin: serverTimestamp() },
+        userRef,
+        {
+          email: user.email,
+          userId: user.uid,
+          lastLogin: serverTimestamp(),
+          isActive: true,
+        },
         { merge: true }
       );
 
-      // 🔹 Save profile for email/password user
       localStorage.setItem(
         "brgy_profile_data",
         JSON.stringify({
@@ -90,36 +124,57 @@ export default function Login() {
       localStorage.removeItem("brgy_is_admin");
       navigate("/home");
     } catch (err) {
-      console.error("Login failed:", err.message);
-      alert(err.message);
+      console.error("Login Error:", err);
+      setNotification("Login failed: " + err.message);
+      setNotificationType("danger");
     }
   };
 
-  // 🔹 Google login
+  // ✅ GOOGLE LOGIN
   const handleGoogleLogin = async () => {
     try {
       const result = await signInWithPopup(auth, googleProvider);
       const user = result.user;
 
-      const archivedSnap = await getDoc(doc(db, "archive", user.uid));
-      if (archivedSnap.exists()) {
-        alert("Your account has been deactivated. Please contact admin.");
-        await auth.signOut();
+      const archivedQuery = query(
+        collection(db, "archiveUsers"),
+        where("email", "==", user.email)
+      );
+      const archivedSnap = await getDocs(archivedQuery);
+
+      if (!archivedSnap.empty) {
+        await signOut(auth);
+        setNotification(
+          "⚠️ Your account has been deactivated. Please contact the admin."
+        );
+        setNotificationType("danger");
+        return;
+      }
+
+      const userRef = doc(db, "users", user.uid);
+      const userSnap = await getDoc(userRef);
+
+      if (userSnap.exists() && userSnap.data().isActive === false) {
+        await signOut(auth);
+        setNotification(
+          "⚠️ Your account has been deactivated. Please contact the admin."
+        );
+        setNotificationType("danger");
         return;
       }
 
       await setDoc(
-        doc(db, "users", user.uid),
+        userRef,
         {
           fullName: user.displayName || "No Name",
           email: user.email,
           userId: user.uid,
           lastLogin: serverTimestamp(),
+          isActive: true,
         },
         { merge: true }
       );
 
-      // 🔹 Save profile for Google login
       localStorage.setItem(
         "brgy_profile_data",
         JSON.stringify({
@@ -134,14 +189,14 @@ export default function Login() {
       localStorage.removeItem("brgy_is_admin");
       navigate("/home");
     } catch (err) {
-      console.error("Google Sign-In error:", err);
-      alert("Google sign-in failed: " + err.message);
+      console.error("Google Login Error:", err);
+      setNotification("Google login failed: " + err.message);
+      setNotificationType("danger");
     }
   };
 
-  // 🔹 Guest login
+  // ✅ GUEST LOGIN
   const handleGuestLogin = async () => {
-    setGuestNameError("");
     if (!fullName.trim()) {
       setGuestNameError("Please enter your full name.");
       return;
@@ -149,52 +204,44 @@ export default function Login() {
 
     try {
       const guestId = "guest_" + Date.now();
-      await setDoc(
-        doc(db, "users", guestId),
-        { fullName: fullName.trim(), userId: guestId, isGuest: true, createdAt: serverTimestamp() },
-        { merge: true }
-      );
+      await setDoc(doc(db, "users", guestId), {
+        fullName,
+        userId: guestId,
+        isGuest: true,
+        createdAt: serverTimestamp(),
+      });
 
-      // 🔹 Save profile for guest
       localStorage.setItem(
         "brgy_profile_data",
         JSON.stringify({
           loginType: "guest",
-          fullName: fullName.trim(),
+          fullName,
           userId: guestId,
-          isGuest: true,
           lastLogin: new Date().toLocaleString(),
         })
       );
 
-      localStorage.removeItem("brgy_is_admin");
       navigate("/home");
     } catch (err) {
       console.error(err);
-      setError("Failed to login as guest. Please try again.");
+      setNotification("Guest login failed.");
+      setNotificationType("danger");
     }
   };
 
-  // 🔹 Forgot password
+  // ✅ FORGOT PASSWORD
   const handlePasswordReset = async () => {
     try {
       const methods = await fetchSignInMethodsForEmail(auth, email);
       if (methods.includes("password")) {
         await sendPasswordResetEmail(auth, email);
-        setResetMessage("📩 Please check your email for the password reset link.");
-        await addDoc(collection(db, "passwordResetRequests"), {
-          email,
-          requestedAt: serverTimestamp(),
-          triggeredBy: "manual-reset",
-        });
-      } else if (methods.includes("google.com")) {
-        setResetMessage("⚠️ This email is registered with Google. Please sign in with Google.");
+        setResetMessage("📩 Check your email for the reset link.");
       } else {
-        setResetMessage("⚠️ No account found with this email.");
+        setResetMessage("⚠️ Email not found or uses Google login.");
       }
     } catch (err) {
       console.error(err);
-      setResetMessage("Error sending reset email: " + err.message);
+      setResetMessage("Error sending reset link.");
     }
   };
 
@@ -202,36 +249,40 @@ export default function Login() {
     <AuthShell side="login" onGoogleSignIn={handleGoogleLogin}>
       <div className="text-center mb-4">
         <h1 className="h3 fw-bold text-success">Welcome</h1>
-        <p className="text-muted mb-3">Log in or continue as Guest</p>
+        <p className="text-muted mb-3">Login or continue as Guest</p>
       </div>
 
+      {/* ✅ Bootstrap Notification */}
+      {notification && (
+        <div
+          className={`alert alert-${notificationType} alert-dismissible fade show`}
+          role="alert"
+        >
+          {notification}
+          <button
+            type="button"
+            className="btn-close"
+            onClick={() => setNotification("")}
+          ></button>
+        </div>
+      )}
+
       <form onSubmit={handleLogin}>
-        {/* Email */}
         <div className="mb-3">
-          <label htmlFor="email" className="form-label">
-            Email
-          </label>
+          <label>Email</label>
           <input
-            id="email"
             type="email"
             className="form-control rounded-pill"
-            placeholder="name@gmail.com"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            onBlur={() => checkSignInMethod(email)}
           />
         </div>
 
-        {/* Password with toggle */}
         <div className="mb-3 position-relative">
-          <label htmlFor="password" className="form-label">
-            Password
-          </label>
+          <label>Password</label>
           <input
-            id="password"
             type={showPassword ? "text" : "password"}
             className="form-control rounded-pill"
-            placeholder="••••••••"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
           />
@@ -239,62 +290,54 @@ export default function Login() {
             type="button"
             onClick={() => setShowPassword(!showPassword)}
             className="btn position-absolute top-50 end-0 translate-middle-y text-success"
-            style={{ border: "none", background: "transparent", zIndex: 10 }}
+            style={{ border: "none", background: "transparent" }}
           >
-            {showPassword ? <FiEyeOff size={20} /> : <FiEye size={20} />}
+            {showPassword ? <FiEyeOff /> : <FiEye />}
           </button>
         </div>
 
-        {notification && <div className="mb-2 text-danger">{notification}</div>}
-
-        <button type="submit" className="btn btn-success w-100 mb-3">
+        <button type="submit" className="btn btn-success w-100 mb-2">
           LOG IN
         </button>
 
-        {/* OR divider */}
-        <div className="d-flex align-items-center my-3">
-          <hr className="flex-grow-1" />
-          <span className="mx-2 text-muted small">OR</span>
-          <hr className="flex-grow-1" />
-        </div>
-
-        {/* Google login */}
         <button
           type="button"
-          className="btn btn-light rounded-pill d-flex align-items-center justify-content-center gap-2 py-2 w-100 mb-3"
+          className="btn btn-light rounded-pill w-100 mb-2 d-flex align-items-center justify-content-center gap-2"
           onClick={handleGoogleLogin}
         >
           <FaGoogle style={{ color: "#EA4335" }} /> Sign in with Google
         </button>
 
-        {/* Forgot password */}
-        <div className="text-center mb-3">
-          <button type="button" onClick={handlePasswordReset} className="btn btn-link p-0">
+        <div className="text-center">
+          <button
+            type="button"
+            className="btn btn-link p-0"
+            onClick={handlePasswordReset}
+          >
             Forgot Password?
           </button>
         </div>
 
-        {resetMessage && <div className="mb-2 text-muted text-center small">{resetMessage}</div>}
-        {error && <div className="mb-2 text-danger text-center">{error}</div>}
+        {resetMessage && (
+          <p className="text-muted small text-center">{resetMessage}</p>
+        )}
       </form>
 
-      {/* Guest login */}
-      <div className="mt-3">
-        <label htmlFor="guestName" className="form-label">
-          Guest Name (optional)
-        </label>
+      <div className="mt-4">
+        <label>Guest Name (optional)</label>
         <input
-          id="guestName"
           type="text"
-          placeholder="Juan Dela Cruz"
           className="form-control mb-2"
+          placeholder="Juan Dela Cruz"
           value={fullName}
           onChange={(e) => setFullName(e.target.value)}
         />
-        <button type="button" onClick={handleGuestLogin} className="btn btn-secondary w-100">
+        <button className="btn btn-secondary w-100" onClick={handleGuestLogin}>
           CONTINUE AS GUEST
         </button>
-        {guestNameError && <div className="mt-1 text-danger small">{guestNameError}</div>}
+        {guestNameError && (
+          <p className="text-danger small mt-1">{guestNameError}</p>
+        )}
       </div>
     </AuthShell>
   );

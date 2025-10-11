@@ -1,4 +1,4 @@
-// AuthShell.jsx
+// src/components/AuthShell.jsx
 import React, { useState } from "react";
 import { FaGoogle } from "react-icons/fa";
 import { motion, AnimatePresence } from "framer-motion";
@@ -13,11 +13,18 @@ import {
   linkWithCredential,
   createUserWithEmailAndPassword,
 } from "firebase/auth";
-import { doc, setDoc, addDoc, collection, getDoc } from "firebase/firestore";
+import {
+  doc,
+  setDoc,
+  addDoc,
+  collection,
+  getDoc,
+  deleteDoc,
+} from "firebase/firestore";
 import { FiEye, FiEyeOff } from "react-icons/fi";
 
 export default function AuthShell() {
-  const [mode, setMode] = useState("login"); // "login" | "guest"
+  const [mode, setMode] = useState("login");
   const isLogin = mode === "login";
 
   const [email, setEmail] = useState("");
@@ -29,7 +36,7 @@ export default function AuthShell() {
 
   const navigate = useNavigate();
 
-  // ---------- Email/Password login ----------
+  // 🔹 Login (with admin + user check)
   const handleLogin = async (e) => {
     e.preventDefault();
     setNotification("");
@@ -40,74 +47,88 @@ export default function AuthShell() {
     }
 
     try {
-      // Check admin credentials
+      // ✅ ADMIN LOGIN
       const adminDocRef = doc(db, "admin", "admin");
       const adminSnap = await getDoc(adminDocRef);
-
       if (adminSnap.exists()) {
         const adminData = adminSnap.data();
-        const adminEmail = adminData.email?.trim().toLowerCase();
-        const adminPass = adminData.password;
-
-        if (email.trim().toLowerCase() === adminEmail) {
-          if (password === adminPass) {
-            await setDoc(adminDocRef, { lastLogin: serverTimestamp() }, { merge: true });
-            localStorage.setItem("brgy_is_admin", "true");
-            navigate("/admin");
-            return;
-          } else {
-            setNotification("Invalid admin password");
-            return;
-          }
+        if (
+          email.trim().toLowerCase() === adminData.email?.trim().toLowerCase() &&
+          password === adminData.password
+        ) {
+          await setDoc(
+            adminDocRef,
+            { lastLogin: serverTimestamp() },
+            { merge: true }
+          );
+          localStorage.setItem("brgy_is_admin", "true");
+          navigate("/admin");
+          return;
         }
       }
 
-      // Normal user login
-      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      // ✅ NORMAL USER LOGIN
+      const userCredential = await signInWithEmailAndPassword(
+        auth,
+        email,
+        password
+      );
       const user = userCredential.user;
 
+      // 🚫 BLOCK DEACTIVATED USERS
       const archivedSnap = await getDoc(doc(db, "archive", user.uid));
       if (archivedSnap.exists()) {
-        alert("Your account has been deactivated. Please contact admin.");
+        alert("Your account has been deactivated or deleted. Please contact admin.");
         await auth.signOut();
         return;
       }
 
-      const userDocRef = doc(db, "users", user.uid);
-      const userSnap = await getDoc(userDocRef);
+      const userRef = doc(db, "users", user.uid);
+      const userSnap = await getDoc(userRef);
 
       const userData = userSnap.exists() ? userSnap.data() : {};
       const fullNameFromDB = userData.fullName || "No Name";
 
-      await setDoc(userDocRef, {
-        email: user.email,
-        userId: user.uid,
-        lastLogin: serverTimestamp(),
-      }, { merge: true });
+      await setDoc(
+        userRef,
+        {
+          email: user.email,
+          userId: user.uid,
+          lastLogin: serverTimestamp(),
+        },
+        { merge: true }
+      );
 
-      // Save unified profile in localStorage
-      localStorage.setItem("brgy_profile_data", JSON.stringify({
-        loginType: "email",
-        fullName: fullNameFromDB,
-        email: user.email,
-        userId: user.uid,
-        lastLogin: new Date().toLocaleString(),
-      }));
+      // ✅ Save local profile
+      localStorage.setItem(
+        "brgy_profile_data",
+        JSON.stringify({
+          loginType: "email",
+          fullName: fullNameFromDB,
+          email: user.email,
+          userId: user.uid,
+          lastLogin: new Date().toLocaleString(),
+        })
+      );
 
       localStorage.removeItem("brgy_is_admin");
       navigate("/home");
     } catch (err) {
       console.error("Login failed:", err.message);
-      alert("Login failed: " + err.message);
+      setNotification("Login failed: " + err.message);
     }
   };
 
-  // ---------- Sign up ----------
+  // 🔹 Sign Up
   const handleSignup = async (e) => {
     e.preventDefault();
     setNotification("");
     try {
-      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+      const userCredential = await createUserWithEmailAndPassword(
+        auth,
+        email,
+        password
+      );
       const user = userCredential.user;
 
       await setDoc(doc(db, "users", user.uid), {
@@ -117,72 +138,60 @@ export default function AuthShell() {
         createdAt: serverTimestamp(),
       });
 
-      localStorage.setItem("brgy_profile_data", JSON.stringify({
-        loginType: "created",
-        fullName: fullName || "No Name",
-        email: user.email,
-        userId: user.uid,
-        lastLogin: new Date().toLocaleString(),
-      }));
+      localStorage.setItem(
+        "brgy_profile_data",
+        JSON.stringify({
+          loginType: "created",
+          fullName: fullName || "No Name",
+          email: user.email,
+          userId: user.uid,
+          lastLogin: new Date().toLocaleString(),
+        })
+      );
 
       navigate("../home");
     } catch (err) {
-      console.error("Signup error:", err);
       setNotification(err.message);
     }
   };
 
-  // ---------- Google Login ----------
+  // 🔹 Google Login
   const handleGoogleLogin = async () => {
     setNotification("");
     try {
       const result = await signInWithPopup(auth, googleProvider);
       const user = result.user;
 
+      // 🚫 BLOCK ARCHIVED USERS
       const archivedSnap = await getDoc(doc(db, "archive", user.uid));
       if (archivedSnap.exists()) {
-        setNotification("❌ Your account has been deleted or deactivated. Please contact admin.");
+        setNotification("❌ Your account has been deactivated. Please contact admin.");
         await auth.signOut();
         return;
       }
 
-      const methods = await fetchSignInMethodsForEmail(auth, user.email);
-      if (!methods.includes("password")) {
-        const tempPassword = "TempPass123!";
-        const credential = EmailAuthProvider.credential(user.email, tempPassword);
-        try {
-          await linkWithCredential(user, credential);
-          await sendPasswordResetEmail(auth, user.email);
-        } catch (err) {
-          if (err.code !== "auth/provider-already-linked") throw err;
-        }
+      await setDoc(
+        doc(db, "users", user.uid),
+        {
+          fullName: user.displayName || "No Name",
+          email: user.email,
+          userId: user.uid,
+          lastLogin: serverTimestamp(),
+        },
+        { merge: true }
+      );
 
-        try {
-          await addDoc(collection(db, "passwordResetRequests"), {
-            email: user.email,
-            requestedAt: serverTimestamp(),
-            triggeredBy: "auto-link",
-          });
-        } catch (err) {
-          console.warn("Could not log password reset request:", err.message);
-        }
-      }
-
-      await setDoc(doc(db, "users", user.uid), {
-        fullName: user.displayName || "No Name",
-        email: user.email,
-        userId: user.uid,
-        lastLogin: serverTimestamp(),
-      }, { merge: true });
-
-      localStorage.setItem("brgy_profile_data", JSON.stringify({
-        loginType: "google",
-        googleName: user.displayName || "No Name",
-        email: user.email,
-        userId: user.uid,
-        profileImage: user.photoURL || "",
-        lastLogin: new Date().toLocaleString(),
-      }));
+      localStorage.setItem(
+        "brgy_profile_data",
+        JSON.stringify({
+          loginType: "google",
+          googleName: user.displayName || "No Name",
+          email: user.email,
+          userId: user.uid,
+          profileImage: user.photoURL || "",
+          lastLogin: new Date().toLocaleString(),
+        })
+      );
 
       localStorage.removeItem("brgy_is_admin");
       navigate("../home");
@@ -192,11 +201,9 @@ export default function AuthShell() {
     }
   };
 
-  // ---------- Guest Login ----------
+  // 🔹 Guest Login
   const handleGuestLogin = async (e) => {
     e.preventDefault();
-    setNotification("");
-
     if (!fullName.trim()) {
       setNotification("⚠️ Please enter your full name.");
       return;
@@ -204,7 +211,6 @@ export default function AuthShell() {
 
     try {
       const guestId = "guest_" + Date.now();
-
       await setDoc(doc(db, "guests", guestId), {
         fullName: fullName.trim(),
         purpose: purpose.trim() || null,
@@ -212,41 +218,35 @@ export default function AuthShell() {
         createdAt: serverTimestamp(),
       });
 
-      localStorage.setItem("brgy_profile_data", JSON.stringify({
-        loginType: "guest",
-        guestName: fullName.trim(),
-        purpose: purpose.trim() || "",
-        userId: guestId,
-        lastLogin: new Date().toLocaleString(),
-      }));
+      localStorage.setItem(
+        "brgy_profile_data",
+        JSON.stringify({
+          loginType: "guest",
+          guestName: fullName.trim(),
+          purpose: purpose.trim() || "",
+          userId: guestId,
+          lastLogin: new Date().toLocaleString(),
+        })
+      );
 
       navigate("../home");
     } catch (err) {
-      console.error("Guest login failed:", err);
       setNotification("Failed to login as guest. Please try again.");
     }
   };
 
-  // ---------- Forgot Password ----------
+  // 🔹 Forgot Password
   const handlePasswordReset = async (emailToReset) => {
     setNotification("");
     try {
       await sendPasswordResetEmail(auth, emailToReset);
-
-      try {
-        await addDoc(collection(db, "passwordResetRequests"), {
-          email: emailToReset,
-          requestedAt: serverTimestamp(),
-          triggeredBy: "manual-reset",
-        });
-      } catch (err) {
-        console.warn("Could not log password reset request:", err.message);
-      }
-
-      setNotification("📩 Please check your email for the password reset link.");
-    } catch (err) {
-      console.error("Password reset failed:", err);
-      setNotification("📩 Please check your email for the password reset link.");
+      await addDoc(collection(db, "passwordResetRequests"), {
+        email: emailToReset,
+        requestedAt: serverTimestamp(),
+      });
+      setNotification("📩 Check your email for reset link.");
+    } catch {
+      setNotification("📩 Please check your email for reset link.");
     }
   };
 

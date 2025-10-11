@@ -197,6 +197,34 @@ export default function ReportFeed() {
     setConfirmId(id);
   }
 
+  useEffect(() => {
+    const fetchReports = async () => {
+      const snapshot = await getDocs(collection(db, "reports"));
+      setReports(snapshot.docs.map((d) => ({ id: d.id, ...d.data() })));
+    };
+    fetchReports();
+  }, []);
+
+  const handleDelete = async (report) => {
+    try {
+      // Move report to archivedReports
+      await setDoc(doc(db, "archivedReports", report.id), {
+        ...report,
+        archivedAt: serverTimestamp(),
+        deletedBy: report.userId || "unknown",
+        deletedByName: report.userName || report.reportedByName || "Unknown User",
+      });
+
+      // Delete from active reports
+      await deleteDoc(doc(db, "reports", report.id));
+
+      alert("Report archived successfully!");
+      setReports((prev) => prev.filter((r) => r.id !== report.id));
+    } catch (error) {
+      console.error("Error archiving report:", error);
+    }
+  };
+
   // cancelDelete fixed
   function cancelDelete() {
     setConfirmId(null);

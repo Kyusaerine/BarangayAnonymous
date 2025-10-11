@@ -12,6 +12,8 @@ import {
   FiLogOut,
 } from "react-icons/fi";
 import { motion, AnimatePresence } from "framer-motion";
+import { setDoc, deleteDoc, doc } from "firebase/firestore";
+import { db } from "../firebase"; // 🔑 import Firestore
 
 const LS_POSTS = "brgy_posts";
 const LS_ROLE = "brgy_role";
@@ -25,96 +27,66 @@ export const STATUSES = [
   "Rejected",
 ];
 
-
-
 const handleArchiveUser = async (user) => {
-try {
-    // Step 1: Restore to active users
-    await setDoc(doc(db, "users", user.id), {
-      ...user,
-      restoredAt: serverTimestamp(),
-      isActive: true,
-      archived: false,
+  try {
+    await setDoc(doc(db, "archive", user.id), {
+      email: user.email || "",
+      name: user.name || "",
+      userId: user.id,
+      archivedAt: new Date(),
     });
-
-    // Step 2: Delete from archive
-    await deleteDoc(doc(db, "archiveUsers", user.id));
-
-    showNotification(`${user.displayName || "User"} restored successfully!`);
-
-    // Step 3: Update UI
-    setArchivedUsers((prev) => prev.filter((u) => u.id !== user.id));
-    setUsers((prev) => [
-      ...prev.filter((u) => u.id !== user.id),
-      { ...user, isActive: true },
-    ]);
-  } catch (error) {
-    console.error("Error restoring user:", error);
+    await deleteDoc(doc(db, "users", user.id));
+    alert("✅ User archived successfully!");
+  } catch (err) {
+    console.error("❌ Error archiving user:", err);
+    alert("Failed to archive user.");
   }
 };
 
 function normalizeStatus(s) {
-  if (!s) return "Awaiting Approval"; // default safeguard
+  if (!s) return "Awaiting Approval";
   const v = String(s).toLowerCase();
   if (v.includes("await")) return "Awaiting Approval";
   if (v.includes("progress")) return "In Progress";
   if (v.includes("resolve")) return "Resolved";
   if (v.includes("receive")) return "Received";
   if (v.includes("reject")) return "Rejected";
-  return "Awaiting Approval"; // fallback to Awaiting if unknown
+  return "Awaiting Approval";
 }
 
 export default function Admin() {
   const navigate = useNavigate();
-const [users, setUsers] = useState([]);
-const [archivedUsers, setArchivedUsers] = useState([]);
 
   const [posts, setPosts] = useState([]);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("Reports");
   const [details, setDetails] = useState(null);
   const [showLogout, setShowLogout] = useState(false);
-
-  // Reject modal state
   const [rejecting, setRejecting] = useState(null);
   const [rejectReason, setRejectReason] = useState("");
 
-  // Load posts
- const load = useCallback(() => {
+  // 🔑 Admin check on mount
+  useEffect(() => {
+    const isAdmin = localStorage.getItem(LS_IS_ADMIN) === "true";
+    if (!isAdmin) navigate("/login", { replace: true });
+  }, [navigate]);
+
+  const load = useCallback(() => {
     try {
-      const raw = localStorage.getItem(LS_POSTS);
-      if (!raw) {
-        setPosts([]);
-        return;
-      }
-
-      const parsed = JSON.parse(raw);
-      if (!Array.isArray(parsed)) {
-        setPosts([]);
-        return;
-      }
-
-      const shaped = parsed.map((p) => ({
+      const raw = JSON.parse(localStorage.getItem(LS_POSTS) || "[]");
+      const shaped = (Array.isArray(raw) ? raw : []).map((p) => ({
         ...p,
-        status: normalizeStatus(p.status || "Awaiting Approval"),
+        status: normalizeStatus(p.status),
       }));
-
       setPosts(
-        shaped.sort((a, b) => Number(b?.createdAt || 0) - Number(a?.createdAt || 0))
+        shaped.sort(
+          (a, b) => Number(b?.createdAt || 0) - Number(a?.createdAt || 0)
+        )
       );
-    } catch (err) {
-      console.error("Error loading posts:", err);
+    } catch {
       setPosts([]);
     }
   }, []);
-
-  useEffect(() => {
-  const isAdmin = localStorage.getItem(LS_IS_ADMIN) === "true";
-  if (!isAdmin) {
-    navigate("/login", { replace: true });
-  }
-}, [navigate]);
-
 
   useEffect(() => {
     load();
@@ -123,16 +95,13 @@ const [archivedUsers, setArchivedUsers] = useState([]);
     return () => window.removeEventListener("storage", onStorage);
   }, [load]);
 
-  // Persist
   const persist = (next) => {
-    const sorted = next.sort(
-      (a, b) => Number(b?.createdAt || 0) - Number(a?.createdAt || 0)
+    localStorage.setItem(LS_POSTS, JSON.stringify(next));
+    setPosts(
+      next.sort((a, b) => Number(b?.createdAt || 0) - Number(a?.createdAt || 0))
     );
-    localStorage.setItem(LS_POSTS, JSON.stringify(sorted));
-    setPosts(sorted);
   };
 
-  // Counts
   const counts = useMemo(() => {
     const c = {
       "Awaiting Approval": 0,
@@ -148,21 +117,15 @@ const [archivedUsers, setArchivedUsers] = useState([]);
     return c;
   }, [posts]);
 
-  // Filtering
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return posts.filter((p) => {
       const status = normalizeStatus(p.status);
       let statusOk = false;
-
-      if (filter === "All") {
-        statusOk = true;
-      } else if (filter === "Reports") {
-        // Reports only shows accepted reports
+      if (filter === "All") statusOk = true;
+      else if (filter === "Reports")
         statusOk = ["Received", "In Progress", "Resolved"].includes(status);
-      } else {
-        statusOk = status === filter;
-      }
+      else statusOk = status === filter;
 
       const hit =
         !q ||
@@ -170,12 +133,10 @@ const [archivedUsers, setArchivedUsers] = useState([]);
         (p.location || "").toLowerCase().includes(q) ||
         (p.desc || "").toLowerCase().includes(q) ||
         (p.userName || "").toLowerCase().includes(q);
-
       return statusOk && hit;
     });
   }, [posts, query, filter]);
 
-  // Status updates
   const setStatus = (id, status) => {
     const next = posts.map((p) =>
       p.id === id
@@ -185,8 +146,7 @@ const [archivedUsers, setArchivedUsers] = useState([]);
     persist(next);
   };
 
-   const acceptReport = (id) => setStatus(id, "Received");
-  const markResolved = (id) => setStatus(id, "Resolved");
+  const acceptReport = (id) => setStatus(id, "Received");
 
   const rejectReport = (post, reason) => {
     const next = posts.map((p) =>
@@ -202,18 +162,18 @@ const [archivedUsers, setArchivedUsers] = useState([]);
     persist(next);
   };
 
-  // Logout
-  function handleLogout() {
+  const handleLogout = () => {
     try {
       localStorage.removeItem(LS_ROLE);
       localStorage.removeItem(LS_IS_ADMIN);
     } catch {}
     navigate("/login", { replace: true });
-  }
+  };
 
-    return (
+
+  return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-900 to-slate-800 text-slate-100">
-      {/* HEADER */}
+      {/* Header */}
       <header className="sticky top-0 z-20 backdrop-blur bg-slate-900/80 border-b border-white/10">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -362,7 +322,96 @@ const [archivedUsers, setArchivedUsers] = useState([]);
         </main>
       </div>
 
-    {/* ✅ LOGOUT MODAL FIXED */}
+      {/* Details Modal */}
+      {details && (
+        <Modal onClose={() => setDetails(null)} title="Report Details">
+          <div className="space-y-3">
+            <h3 className="text-lg font-semibold text-emerald-400">
+              {details.issue}
+            </h3>
+            <div className="text-sm text-slate-300 flex items-center gap-1">
+              <FiMapPin className="opacity-70" /> {details.location}
+            </div>
+            <div className="text-xs text-slate-400 flex items-center gap-1">
+              <FiClock className="opacity-70" />{" "}
+              {new Date(details.createdAt).toLocaleString()}
+            </div>
+            <StatusBadge status={normalizeStatus(details.status)} />
+            {details.desc && (
+              <p className="text-sm text-slate-200">{details.desc}</p>
+            )}
+            {details.imageUrl && (
+              <img
+                src={details.imageUrl}
+                alt="attachment"
+                className="mt-2 w-full max-h-80 object-cover rounded-xl ring-1 ring-white/10"
+              />
+            )}
+            {details.status === "Rejected" && details.rejectionReason && (
+              <p className="mt-2 text-sm text-rose-400">
+                Reason: {details.rejectionReason}
+              </p>
+            )}
+          </div>
+        </Modal>
+      )}
+
+      {/* Reject Modal */}
+      <AnimatePresence>
+        {rejecting && (
+          <motion.div
+            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <div
+              className="absolute inset-0 bg-black/60"
+              onClick={() => setRejecting(null)}
+            />
+            <motion.div
+              className="relative z-10 w-full max-w-md rounded-2xl bg-slate-900 text-slate-100 p-6"
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+            >
+              <h3 className="text-lg font-semibold text-rose-400">
+                Reject Report
+              </h3>
+              <p className="mt-2 text-sm text-slate-300">
+                Provide a reason for rejecting <b>{rejecting.issue}</b>:
+              </p>
+              <textarea
+                value={rejectReason}
+                onChange={(e) => setRejectReason(e.target.value)}
+                rows={3}
+                className="mt-3 w-full rounded-xl bg-slate-800 text-slate-100 px-3 py-2 outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-rose-400"
+                placeholder="e.g., Duplicate report, not a barangay issue..."
+              />
+              <div className="mt-4 flex justify-end gap-3">
+                <button
+                  onClick={() => setRejecting(null)}
+                  className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    rejectReport(rejecting, rejectReason || "No reason given");
+                    setRejecting(null);
+                    setRejectReason("");
+                  }}
+                  className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700"
+                >
+                  Reject
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Logout Modal */}
       <AnimatePresence>
         {showLogout && (
           <motion.div
@@ -426,11 +475,13 @@ function SideLink({ children, active, onClick }) {
   );
 }
 
-function StatCard({ label, value, grad }) {
+function StatCard({ label, value, grad, textDark = false }) {
   return (
     <div className="h-32 rounded-2xl overflow-hidden ring-1 ring-white/10 bg-white/5 flex">
       <div
-        className={`flex flex-col justify-center px-6 w-full bg-gradient-to-r ${grad} text-slate-900`}
+        className={`flex flex-col justify-center px-6 w-full bg-gradient-to-r ${grad} ${
+          textDark ? "text-slate-900" : "text-white"
+        }`}
       >
         <div className="text-4xl font-extrabold">{value}</div>
         <div className="mt-1 text-lg font-medium">{label}</div>
@@ -550,7 +601,16 @@ function StatusBadge({ status, lightCard = false }) {
     Resolved: "bg-slate-100 text-slate-800 ring-slate-300",
     Rejected: "bg-rose-50 text-rose-800 ring-rose-200",
   };
-  const cls = mapLight[s] || "bg-white/10 text-white/70 ring-white/10";
+  const mapDark = {
+    "Awaiting Approval": "bg-amber-400/20 text-amber-200 ring-amber-300/30",
+    Received: "bg-indigo-400/20 text-indigo-200 ring-indigo-300/30",
+    "In Progress": "bg-emerald-400/20 text-emerald-200 ring-emerald-300/30",
+    Resolved: "bg-slate-400/20 text-slate-200 ring-slate-300/30",
+    Rejected: "bg-rose-400/20 text-rose-200 ring-rose-300/30",
+  };
+  const cls =
+    (lightCard ? mapLight : mapDark)[s] ||
+    "bg-white/10 text-white/70 ring-white/10";
   const dot =
     s === "Awaiting Approval"
       ? "bg-amber-400"
@@ -569,5 +629,28 @@ function StatusBadge({ status, lightCard = false }) {
       <span className={`h-2 w-2 rounded-full ${dot}`} />
       {s}
     </span>
+  );
+}
+
+function Modal({ title, children, onClose }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div
+        className="absolute inset-0 bg-black/60 backdrop-blur-[2px]"
+        onClick={onClose}
+      />
+      <div className="relative z-10 w-full max-w-2xl rounded-2xl bg-slate-900 text-slate-100 ring-1 ring-white/10 shadow-2xl">
+        <div className="px-5 py-4 border-b border-white/10 flex items-center justify-between">
+          <h3 className="font-semibold text-emerald-400">{title}</h3>
+          <button
+            onClick={onClose}
+            className="h-9 w-9 grid place-items-center rounded-xl hover:bg-white/10"
+          >
+            <FiX />
+          </button>
+        </div>
+        <div className="p-5">{children}</div>
+      </div>
+    </div>
   );
 }
