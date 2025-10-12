@@ -1,9 +1,19 @@
 // src/pages/ReportFeed.jsx
-import React from "react";
-import { useEffect, useMemo, useState, useRef } from "react";
-import { collection, addDoc, doc, updateDoc, deleteDoc, onSnapshot, query, orderBy } from "firebase/firestore";
-import { db } from "../firebase";
-import { auth } from "../firebase";
+import React, { useEffect, useMemo, useState, useRef } from "react";
+import {
+  collection,
+  addDoc,
+  doc,
+  updateDoc,
+  deleteDoc,
+  onSnapshot,
+  query,
+  orderBy,
+  getDocs,
+  setDoc,
+  serverTimestamp,
+} from "firebase/firestore";
+import { db, auth } from "../firebase";
 import {
   FiAlertTriangle,
   FiMapPin,
@@ -20,7 +30,7 @@ import {
 } from "react-icons/fi";
 import { Link } from "react-router-dom";
 
-/** Reaction definitions */
+/** Reactions */
 const REACTIONS = [
   { key: "like", emoji: "👍", label: "Like" },
   { key: "love", emoji: "❤️", label: "Love" },
@@ -31,13 +41,7 @@ const REACTIONS = [
 ];
 const EMPTY_REACTIONS = { like: 0, love: 0, haha: 0, wow: 0, sad: 0, angry: 0 };
 
-const STATUS_OPTIONS = [
-  "Waiting Approval",
-  "Received",
-  "In Progress",
-  "Resolved",
-];
-
+const STATUS_OPTIONS = ["Waiting Approval", "Received", "In Progress", "Resolved"];
 const LS_POSTS = "brgy_posts";
 const LS_MY_REACTS = "brgy_my_reacts";
 
@@ -47,10 +51,11 @@ export default function ReportFeed() {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
   const [confirmId, setConfirmId] = useState(null);
+  const [reports, setReports] = useState([]);
   const user = auth.currentUser;
-  const profileName = user?.displayName || "Guest";
+  const profileName = user?.displayName || user?.email || "Guest";
 
-  // ensure consistent shape for a post
+  // Ensure consistent post structure
   const ensureShape = (p) => ({
     ...p,
     reactions: { ...EMPTY_REACTIONS, ...(p?.reactions || {}) },
@@ -59,7 +64,7 @@ export default function ReportFeed() {
     statusUpdatedAt: p?.statusUpdatedAt ?? p?.createdAt ?? Date.now(),
   });
 
-  // --- Local cache load/persist (optional offline cache) ---
+  // --- Load local cache ---
   const load = () => {
     try {
       const all = JSON.parse(localStorage.getItem(LS_POSTS) || "[]")
@@ -79,7 +84,6 @@ export default function ReportFeed() {
 
   useEffect(() => {
     load();
-    // listen to storage events from other tabs
     const onStorage = (e) => {
       if (e.key === LS_POSTS || e.key === LS_MY_REACTS) load();
     };
@@ -100,7 +104,7 @@ export default function ReportFeed() {
     setMyReacts(next);
   };
 
-  // --- Real-time listener from Firestore ---
+  // --- Firestore listener ---
   useEffect(() => {
     const q = query(collection(db, "reports"), orderBy("createdAt", "desc"));
     const unsubscribe = onSnapshot(
@@ -108,7 +112,6 @@ export default function ReportFeed() {
       (snapshot) => {
         const reports = snapshot.docs.map((d) => {
           const data = d.data() || {};
-          // normalize Firestore timestamp => milliseconds (if using serverTimestamp elsewhere)
           const createdAt =
             data?.createdAt && typeof data.createdAt === "object" && data.createdAt?.toMillis
               ? data.createdAt.toMillis()
@@ -121,7 +124,6 @@ export default function ReportFeed() {
               ? data.statusUpdatedAt.toMillis()
               : data.statusUpdatedAt ?? createdAt;
 
-          // normalize comments createdAt if stored as Firestore Timestamp
           const comments =
             Array.isArray(data.comments) && data.comments.length
               ? data.comments.map((c) => ({
@@ -133,39 +135,26 @@ export default function ReportFeed() {
                 }))
               : [];
 
-          return ensureShape({
-            id: d.id,
-            ...data,
-            createdAt,
-            statusUpdatedAt,
-            comments,
-          });
+          return ensureShape({ id: d.id, ...data, createdAt, statusUpdatedAt, comments });
         });
 
         persistPosts(reports);
+        setReports(reports);
       },
-      (err) => {
-        console.error("reports onSnapshot error:", err);
-      }
+      (err) => console.error("reports onSnapshot error:", err)
     );
 
     return () => unsubscribe();
   }, []);
 
-  // ---------- Create (New report) ----------
+  // --- Create report ---
   async function handleSaved(newPost) {
     try {
-      // Send to Firestore. Do not rely only on local id — Firestore will create doc id
       const payload = { ...newPost };
-      // Remove client-supplied id if present; we'll use firestore doc.id
       if (payload.id) delete payload.id;
-
       const docRef = await addDoc(collection(db, "reports"), payload);
-
-      // Optimistic local update (onSnapshot will correct / replace)
       const optimistic = [{ ...newPost, id: docRef.id }, ...posts];
       persistPosts(optimistic);
-
       setShowForm(false);
     } catch (err) {
       console.error("Failed to save report to Firebase:", err);
@@ -173,16 +162,13 @@ export default function ReportFeed() {
     }
   }
 
-  // ---------- Update ----------
+  // --- Update report ---
   async function handleUpdated(updatedPost) {
     try {
       const docRef = doc(db, "reports", updatedPost.id);
       const payload = { ...updatedPost };
       delete payload.id;
-      // update Firestore
       await updateDoc(docRef, payload);
-
-      // optimistic local update (onSnapshot will sync)
       const next = posts.map((p) => (p.id === updatedPost.id ? ensureShape(updatedPost) : p));
       persistPosts(next);
       setEditing(null);
@@ -192,118 +178,71 @@ export default function ReportFeed() {
     }
   }
 
-  // ---------- DELETE flow ----------
+  // --- Delete / Archive ---
   function requestDelete(id) {
     setConfirmId(id);
   }
 
-  useEffect(() => {
-    const fetchReports = async () => {
-      const snapshot = await getDocs(collection(db, "reports"));
-      setReports(snapshot.docs.map((d) => ({ id: d.id, ...d.data() })));
-    };
-    fetchReports();
-  }, []);
-
-  const handleDelete = async (report) => {
-    try {
-      // Move report to archivedReports
-      await setDoc(doc(db, "archivedReports", report.id), {
-        ...report,
-        archivedAt: serverTimestamp(),
-        deletedBy: report.userId || "unknown",
-        deletedByName: report.userName || report.reportedByName || "Unknown User",
-      });
-
-      // Delete from active reports
-      await deleteDoc(doc(db, "reports", report.id));
-
-      alert("Report archived successfully!");
-      setReports((prev) => prev.filter((r) => r.id !== report.id));
-    } catch (error) {
-      console.error("Error archiving report:", error);
-    }
-  };
-
-  // cancelDelete fixed
   function cancelDelete() {
     setConfirmId(null);
   }
 
-async function confirmDelete() {
-  if (!confirmId) return;
-  try {
-    // 1️⃣ Get the post data before deleting
-    const postToDelete = posts.find((p) => p.id === confirmId);
-    if (postToDelete) {
-      // 2️⃣ Save it to an 'archive' collection in Firestore
-      await addDoc(collection(db, "archivedReports"), {
-        ...postToDelete,
-        deletedAt: Date.now(), // optional: track when it was archived
-      });
+  async function confirmDelete() {
+    if (!confirmId) return;
+    try {
+      const postToDelete = posts.find((p) => p.id === confirmId);
+      if (postToDelete) {
+        await setDoc(doc(db, "archivedReports", postToDelete.id), {
+          ...postToDelete,
+          deletedAt: Date.now(),
+        });
+      }
+      await deleteDoc(doc(db, "reports", confirmId));
+
+      if (myReacts[confirmId]) {
+        const { [confirmId]: _, ...rest } = myReacts;
+        persistMyReacts(rest);
+      }
+
+      setConfirmId(null);
+    } catch (err) {
+      console.error("Failed to delete report from Firebase:", err);
+      alert("Failed to delete report. Please try again.");
     }
-
-    // 3️⃣ Delete from 'reports' collection
-    await deleteDoc(doc(db, "reports", confirmId));
-
-    // 4️⃣ Cleanup local reacts if any
-    if (myReacts[confirmId]) {
-      const { [confirmId]: _, ...rest } = myReacts;
-      persistMyReacts(rest);
-    }
-
-    setConfirmId(null);
-    // onSnapshot will update posts automatically
-  } catch (err) {
-    console.error("Failed to delete report from Firebase:", err);
-    alert("Failed to delete report. Please try again.");
   }
-}
 
-
-  // ---------- Reactions (optimistic + Firestore) ----------
+  // --- Reactions ---
   async function handleReact(id, key) {
     const idx = posts.findIndex((p) => p.id === id);
     if (idx === -1) return;
 
     const current = myReacts[id];
-    // deep clone to avoid accidental refs
     const nextPosts = posts.map((p) => ({ ...p, reactions: { ...(p.reactions || {}) } }));
     const target = nextPosts[idx];
 
-    // remove previous reaction if any
-    if (current && target.reactions[current] > 0) {
-      target.reactions[current] -= 1;
-    }
+    if (current && target.reactions[current] > 0) target.reactions[current] -= 1;
 
     let nextMyReacts;
     if (current === key) {
-      // unreact
       const { [id]: _, ...rest } = myReacts;
       nextMyReacts = rest;
     } else {
-      // add/toggle
       target.reactions[key] = (target.reactions[key] || 0) + 1;
       nextMyReacts = { ...myReacts, [id]: key };
     }
 
-    // optimistic UI update
     persistPosts(nextPosts);
     persistMyReacts(nextMyReacts);
 
-    // persist to Firestore (replace reactions object)
     try {
-      await updateDoc(doc(db, "reports", id), {
-        reactions: target.reactions,
-      });
+      await updateDoc(doc(db, "reports", id), { reactions: target.reactions });
     } catch (err) {
       console.error("Failed to update reaction in Firestore:", err);
-      // optionally: rollback or notify user
     }
   }
 
-  // ---------- Comments ----------
-  async function handleAddComment(id, text, userName = "Guest") {
+  // --- Comments ---
+  async function handleAddComment(id, text, userName = profileName) {
     const value = (text || "").trim();
     if (value.length < 2) return;
 
@@ -318,19 +257,13 @@ async function confirmDelete() {
     };
 
     const nextPosts = posts.map((p, i) =>
-      i === idx
-        ? { ...p, comments: [...(p.comments || []), newComment] }
-        : p
+      i === idx ? { ...p, comments: [...(p.comments || []), newComment] } : p
     );
 
-    // optimistic update
     persistPosts(nextPosts);
 
-    // persist to Firestore
     try {
-      await updateDoc(doc(db, "reports", id), {
-        comments: nextPosts[idx].comments,
-      });
+      await updateDoc(doc(db, "reports", id), { comments: nextPosts[idx].comments });
     } catch (err) {
       console.error("Failed to add comment in Firestore:", err);
     }
@@ -345,34 +278,24 @@ async function confirmDelete() {
             <h1 className="text-2xl sm:text-3xl font-extrabold text-[var(--color-primary)]">
               Community Report Feed
             </h1>
-            <p className="text-black/70 text-sm">
-              React, comment, edit, and track status.
-            </p>
+            <p className="text-black/70 text-sm">React, comment, edit, and track status.</p>
           </div>
-
-          {/* Actions */}
           <div className="flex items-center gap-2 justify-end">
-            <div className="flex items-center gap-2">
-              <Link
-                to="/dashboard"
-                className="inline-flex items-center gap-2 rounded-xl bg-white ring-1 ring-black/10 px-3 py-2 hover:bg-black/5"
-                title="Back to Home"
-              >
-                <FiArrowLeft /> Back to Dashboard
-              </Link>
-            </div>
-
+            <Link
+              to="/dashboard"
+              className="inline-flex items-center gap-2 rounded-xl bg-white ring-1 ring-black/10 px-3 py-2 hover:bg-black/5"
+            >
+              <FiArrowLeft /> Back to Dashboard
+            </Link>
             <button
               onClick={load}
               className="inline-flex items-center gap-2 rounded-xl bg-white ring-1 ring-black/10 px-3 py-2 hover:bg-black/5"
-              title="Refresh"
             >
               <FiRefreshCw /> Refresh
             </button>
             <button
               onClick={() => setShowForm(true)}
-              className="inline-flex items-center gap-2 rounded-xl px-3 py-2 font-semibold
-                         bg-[var(--color-primary)] text-white hover:bg-[var(--color-primary-hover)]"
+              className="inline-flex items-center gap-2 rounded-xl px-3 py-2 font-semibold bg-[var(--color-primary)] text-white hover:bg-[var(--color-primary-hover)]"
             >
               New Report
             </button>
@@ -390,42 +313,21 @@ async function confirmDelete() {
                 post={p}
                 myReaction={myReacts[p.id]}
                 onReact={(key) => handleReact(p.id, key)}
-                onAddComment={(txt) => handleAddComment(p.id, txt, profileName)}
+                onAddComment={(txt) => handleAddComment(p.id, txt)}
                 onDelete={() => requestDelete(p.id)}
                 onEdit={() => setEditing(p)}
-                onAccept={(updatedPost) => handleUpdated(updatedPost)}
               />
             ))}
           </div>
         )}
       </div>
 
-      {/* Modal: New report */}
-      {showForm && (
-        <NewReportModal
-          onClose={() => setShowForm(false)}
-          onSaved={handleSaved}
-          profileName={profileName}
-        />
-      )}
-
-      {/* Modal: Edit report */}
-      {editing && (
-        <EditReportModal
-          post={editing}
-          onClose={() => setEditing(null)}
-          onSaved={handleUpdated}
-        />
-      )}
-
-      {/* Confirm delete dialog */}
-      {confirmId && (
-        <ConfirmDelete onCancel={cancelDelete} onConfirm={confirmDelete} />
-      )}
+      {showForm && <NewReportModal onClose={() => setShowForm(false)} onSaved={handleSaved} profileName={profileName} />}
+      {editing && <EditReportModal post={editing} onClose={() => setEditing(null)} onSaved={handleUpdated} />}
+      {confirmId && <ConfirmDelete onCancel={cancelDelete} onConfirm={confirmDelete} />}
     </div>
   );
 }
-
 /* ---------- Confirm Delete Modal ---------- */
 function ConfirmDelete({ onCancel, onConfirm }) {
   return (

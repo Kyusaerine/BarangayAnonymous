@@ -1,7 +1,8 @@
-// src/pages/NewReport.jsx
+// NEW REPORT
+
 import React, { useState, useRef, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { db } from "../firebase";
+import { db, auth } from "../firebase";
 import {
   collection,
   addDoc,
@@ -12,8 +13,9 @@ import {
   doc,
   updateDoc,
   getDoc,
+  deleteDoc,
+  setDoc,
 } from "firebase/firestore";
-
 import {
   FiMapPin,
   FiImage,
@@ -21,29 +23,30 @@ import {
   FiArrowLeft,
   FiCheckCircle,
   FiAlertCircle,
+  FiUser,
 } from "react-icons/fi";
+import { onAuthStateChanged } from "firebase/auth";
+
+const LS_PROFILE = "brgy_profile_data";
+const LS_POSTS = "brgy_posts";
 
 export default function NewReport() {
   const navigate = useNavigate();
   const locationRef = useRef(null);
 
-  const googleUser = JSON.parse(localStorage.getItem("googlename"));
-  const savedProfileName =
-    localStorage.getItem("brgy_profile_name") || "Guest";
-
   const [form, setForm] = useState({
-    userName: googleUser?.fullname || savedProfileName || "Guest",
+    userName: "",
     issue: "",
     location: "",
     desc: "",
     imagePreview: "",
     imageDataUrl: "",
+    userProfileImage: "",
   });
 
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState({ type: "", text: "" });
   const [reports, setReports] = useState([]);
-  const [notify, setNotify] = useState(""); // Notification for no reports
   const [editingReportId, setEditingReportId] = useState(null);
 
   const issues = [
@@ -56,33 +59,82 @@ export default function NewReport() {
     "Others",
   ];
 
-  // Listen for APPROVED reports
+  // 🔹 Load approved reports
   useEffect(() => {
-    const q = query(
-      collection(db, "reports"),
-      where("status", "==", "Approved")
-    );
+    const q = query(collection(db, "reports"), where("status", "==", "Approved"));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const data = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
       setReports(data);
-      setNotify(data.length === 0 ? "No approved reports yet." : "");
     });
     return () => unsubscribe();
   }, []);
 
+  // 🔹 Sync profile from auth + localStorage
+  useEffect(() => {
+    const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
+      const storedProfile = JSON.parse(localStorage.getItem(LS_PROFILE)) || {};
+
+      let displayName = "Guest";
+      let profileImage = "";
+
+      if (user) {
+        // Logged in via Firebase (email/password or Google)
+        displayName = user.displayName || storedProfile.fullName || "Anonymous User";
+        profileImage = user.photoURL || storedProfile.profileImage || "";
+      } else {
+        // Guest / create account
+        displayName =
+          storedProfile.fullName ||
+          storedProfile.googleName ||
+          storedProfile.guestName ||
+          "Guest";
+        profileImage = storedProfile.profileImage || "";
+      }
+
+      setForm((prev) => ({
+        ...prev,
+        userName: displayName,
+        userProfileImage: profileImage,
+      }));
+    });
+
+    const updateProfileFromStorage = () => {
+      const updatedProfile = JSON.parse(localStorage.getItem(LS_PROFILE)) || {};
+      setForm((prev) => ({
+        ...prev,
+        userName:
+          updatedProfile.fullName ||
+          updatedProfile.googleName ||
+          updatedProfile.guestName ||
+          "Guest",
+        userProfileImage: updatedProfile.profileImage || "",
+      }));
+    };
+
+    window.addEventListener("storage", updateProfileFromStorage);
+    updateProfileFromStorage(); // run immediately
+
+    return () => {
+      unsubscribeAuth();
+      window.removeEventListener("storage", updateProfileFromStorage);
+    };
+  }, []);
+
+  // 🔹 Edit report
   function handleEdit(report) {
     setForm({
-      userName: report.userName,
+      userName: report.userFullName || report.userName || "Guest",
       issue: report.issue,
       location: report.location,
       desc: report.desc,
       imagePreview: report.imageUrl || "",
       imageDataUrl: report.imageUrl || "",
+      userProfileImage: report.userProfileImage || "",
     });
     setEditingReportId(report.id);
   }
 
-  // Handle image upload
+  // 🔹 Image handling
   async function handleImg(e) {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -106,6 +158,7 @@ export default function NewReport() {
     setForm((s) => ({ ...s, imagePreview: "", imageDataUrl: "" }));
   }
 
+  // 🔹 Detect location
   async function detectLocation() {
     if (!navigator.geolocation) {
       alert("Geolocation is not supported by your browser.");
@@ -136,112 +189,138 @@ export default function NewReport() {
     );
   }
 
-async function handleSubmit(e) {
-  e.preventDefault();
-
-  if (!form.issue) {
-    setMessage({ type: "error", text: "Please select an issue." });
-    return;
-  }
-  if (!form.desc || form.desc.trim().length < 10) {
-    setMessage({
-      type: "error",
-      text: "Please describe the issue (at least 10 characters).",
-    });
-    return;
-  }
-
-  setSubmitting(true);
-
-  try {
-    const user = googleUser || null;
-
-    if (editingReportId) {
-      const reportRef = doc(db, "reports", editingReportId);
+  // 🔹 Delete & archive report
+  async function handleArchiveReport(report) {
+    try {
+      const reportRef = doc(db, "reports", report.id);
       const reportSnap = await getDoc(reportRef);
-
-      if (!reportSnap.exists()) {
-        setMessage({ type: "error", text: "Report not found." });
-        setSubmitting(false);
-        return;
-      }
+      if (!reportSnap.exists()) return;
 
       const reportData = reportSnap.data();
 
-      // Check permissions: only owner or admin can update
-      let isAdmin = false;
-      if (user) {
-        const userSnap = await getDoc(doc(db, "users", user.uid));
-        isAdmin = userSnap.data()?.isAdmin || false;
-      }
-
-      const canEdit =
-        (reportData.userId && reportData.userId === user?.uid) || isAdmin;
-
-      if (!canEdit) {
-        setMessage({
-          type: "error",
-          text: "You are not allowed to edit this report.",
-        });
-        setSubmitting(false);
-        return;
-      }
-
-      await updateDoc(reportRef, {
-        issue: form.issue,
-        desc: form.desc,
-        location: form.location,
-        imageUrl: form.imageDataUrl || "",
-        updatedAt: serverTimestamp(),
+      await setDoc(doc(db, "archivedReports", report.id), {
+        ...reportData,
+        archivedAt: serverTimestamp(),
+        deletedBy: auth.currentUser?.uid || "admin",
+        deletedByName: auth.currentUser?.displayName || "Admin",
       });
 
-      setMessage({ type: "success", text: "Report updated successfully!" });
-    } else {
-      await addDoc(collection(db, "reports"), {
-        issue: form.issue,
-        desc: form.desc,
-        location: form.location,
-        imageUrl: form.imageDataUrl || "",
-        userName: form.userName,
-        userId: user?.uid || null,
-        createdAt: serverTimestamp(),
-        status: "Awaiting Approval",
-        visible: false,
-        reason: "",
-      });
+      await deleteDoc(reportRef);
 
-      setMessage({ type: "success", text: "Report submitted successfully!" });
+      setReports((prev) => prev.filter((r) => r.id !== report.id));
+      alert("Report archived successfully!");
+    } catch (err) {
+      console.error("Error archiving report:", err);
+      alert("Failed to archive report.");
+    }
+  }
+
+  // 🔹 Submit report
+  async function handleSubmit(e) {
+    e.preventDefault();
+
+    if (!form.issue) {
+      setMessage({ type: "error", text: "Please select an issue." });
+      return;
+    }
+    if (!form.desc || form.desc.trim().length < 10) {
+      setMessage({
+        type: "error",
+        text: "Please describe the issue (at least 10 characters).",
+      });
+      return;
     }
 
-    // Clear form
-    setForm({
-      userName: user?.fullname || savedProfileName || "Guest",
-      issue: "",
-      location: "",
-      desc: "",
-      imagePreview: "",
-      imageDataUrl: "",
-    });
-    setEditingReportId(null);
+    setSubmitting(true);
 
-    setTimeout(() => navigate("/reportfeed"), 1000);
-  } catch (err) {
-    console.error("Error saving report:", err);
-    setMessage({
-      type: "error",
-      text: "Something went wrong. Please try again.",
-    });
-  } finally {
-    setSubmitting(false);
+    try {
+      const currentProfile = JSON.parse(localStorage.getItem(LS_PROFILE)) || {};
+      const user = auth.currentUser;
+
+      if (editingReportId) {
+        const reportRef = doc(db, "reports", editingReportId);
+        const reportSnap = await getDoc(reportRef);
+
+        if (!reportSnap.exists()) {
+          setMessage({ type: "error", text: "Report not found." });
+          setSubmitting(false);
+          return;
+        }
+
+        await updateDoc(reportRef, {
+          issue: form.issue,
+          desc: form.desc,
+          location: form.location,
+          imageUrl: form.imageDataUrl || "",
+          userFullName:
+            currentProfile.fullName ||
+            currentProfile.googleName ||
+            currentProfile.guestName ||
+            "Anonymous User",
+          userProfileImage: currentProfile.profileImage || "",
+          updatedAt: serverTimestamp(),
+        });
+
+        setMessage({ type: "success", text: "Report updated successfully!" });
+      } else {
+        const newReport = {
+          id: Date.now(),
+          userId: user?.uid || "guest",
+          userFullName:
+            currentProfile.fullName ||
+            currentProfile.googleName ||
+            currentProfile.guestName ||
+            "Anonymous User",
+          userProfileImage: currentProfile.profileImage || "",
+          issue: form.issue,
+          desc: form.desc,
+          location: form.location,
+          imageUrl: form.imageDataUrl || "",
+          createdAt: serverTimestamp(),
+          status: "Awaiting Approval",
+          visible: false,
+          reason: "",
+        };
+
+        await addDoc(collection(db, "reports"), newReport);
+
+        const currentPosts = JSON.parse(localStorage.getItem(LS_POSTS) || "[]");
+        currentPosts.push(newReport);
+        localStorage.setItem(LS_POSTS, JSON.stringify(currentPosts));
+
+        setReports((prev) => [...prev, newReport]);
+      }
+
+      setForm({
+        userName:
+          currentProfile.fullName ||
+          currentProfile.googleName ||
+          "Guest",
+        issue: "",
+        location: "",
+        desc: "",
+        imagePreview: "",
+        imageDataUrl: "",
+        userProfileImage: currentProfile.profileImage || "",
+      });
+      setEditingReportId(null);
+
+      setTimeout(() => navigate("/reportfeed"), 500);
+    } catch (err) {
+      console.error("Error saving report:", err);
+      setMessage({
+        type: "error",
+        text: "Something went wrong. Please try again.",
+      });
+    } finally {
+      setSubmitting(false);
+    }
   }
-}
-
 
   return (
     <div className="mx-auto w-full max-w-3xl space-y-10">
       {/* Approved reports list */}
       <section>
-        <h2 className="text-xl font-bold mb-4">Community Reports</h2>
         {reports.length > 0 &&
           reports.map((r) => (
             <div key={r.id} className="border p-4 rounded mb-4 space-y-2">
@@ -249,7 +328,22 @@ async function handleSubmit(e) {
                 <h3 className="font-semibold text-[var(--color-primary)]">
                   {r.issue}
                 </h3>
-                <span className="text-xs text-black/60">{r.userName}</span>
+                <div className="flex items-center gap-2">
+                  {r.userProfileImage ? (
+                    <img
+                      src={r.userProfileImage}
+                      alt="Profile"
+                      className="h-8 w-8 object-cover rounded-full"
+                    />
+                  ) : (
+                    <div className="h-8 w-8 grid place-items-center rounded-full bg-gray-200">
+                      <FiUser className="text-sm text-gray-500" />
+                    </div>
+                  )}
+                  <span className="text-xs text-black/60">
+                    {r.userFullName || r.userName}
+                  </span>
+                </div>
               </div>
               <p>{r.desc}</p>
               {r.location && (
@@ -264,21 +358,22 @@ async function handleSubmit(e) {
                   className="mt-2 max-h-40 w-full object-cover rounded-lg ring-1 ring-black/10"
                 />
               )}
-              <button
-                onClick={() => handleEdit(r)}
-                className="mt-2 rounded-lg bg-blue-600 text-white px-3 py-1 text-sm hover:bg-blue-700"
-              >
-                Edit
-              </button>
+              <div className="flex gap-2 mt-2">
+                <button
+                  onClick={() => handleEdit(r)}
+                  className="rounded-lg bg-blue-600 text-white px-3 py-1 text-sm hover:bg-blue-700"
+                >
+                  Edit
+                </button>
+                <button
+                  onClick={() => handleArchiveReport(r)}
+                  className="rounded-lg bg-red-600 text-white px-3 py-1 text-sm hover:bg-red-700"
+                >
+                  Archive
+                </button>
+              </div>
             </div>
           ))}
-
-        {notify && (
-          <div className="mb-4 flex items-center gap-2 rounded-xl px-4 py-3 text-sm bg-rose-50 text-rose-800 ring-1 ring-rose-200">
-            <FiAlertCircle className="shrink-0" />
-            <span className="flex-1">{notify}</span>
-          </div>
-        )}
       </section>
 
       {/* New Report Form */}
@@ -317,6 +412,23 @@ async function handleSubmit(e) {
           className="rounded-2xl bg-white ring-1 ring-black/10 p-5 sm:p-6 space-y-5"
         >
           {/* Name & Issue */}
+          <div className="flex items-center gap-3">
+            {form.userProfileImage ? (
+              <img
+                src={form.userProfileImage}
+                alt="Profile"
+                className="h-12 w-12 object-cover rounded-full"
+              />
+            ) : (
+              <div className="h-12 w-12 grid place-items-center rounded-full bg-gray-200">
+                <FiUser className="text-xl text-gray-500" />
+              </div>
+            )}
+            <div className="w-full rounded-xl bg-[var(--color-secondary)] px-4 py-3">
+              {form.userName}
+            </div>
+          </div>
+
           <div className="grid sm:grid-cols-2 gap-4">
             <div className="space-y-1">
               <label className="text-sm font-medium">Your Name</label>
@@ -397,7 +509,12 @@ async function handleSubmit(e) {
               <label className="inline-flex items-center gap-2 rounded-xl px-4 py-2 ring-1 ring-black/10 cursor-pointer">
                 <FiImage />
                 <span>Upload image</span>
-                <input type="file" accept="image/*" hidden onChange={handleImg} />
+                <input
+                  type="file"
+                  accept="image/*"
+                  hidden
+                  onChange={handleImg}
+                />
               </label>
 
               {form.imagePreview && (
@@ -429,6 +546,7 @@ async function handleSubmit(e) {
               Cancel
             </Link>
             <button
+              type="submit"
               disabled={submitting}
               className="inline-flex justify-center rounded-xl px-5 py-2 font-semibold bg-[var(--color-primary)] text-white disabled:opacity-60"
             >
