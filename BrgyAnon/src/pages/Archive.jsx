@@ -8,7 +8,6 @@ import {
   doc,
   serverTimestamp,
   onSnapshot,
-  updateDoc,
 } from "firebase/firestore";
 import { db } from "../firebase";
 import {
@@ -55,7 +54,6 @@ const Archive = () => {
       const data = snapshot.docs.map((d) => ({ id: d.id, ...d.data(), isProcessing: false }));
       const filtered = data.filter(
         (u) =>
-          u.isActive === false &&
           !(
             u.email?.toLowerCase().includes("guest") ||
             u.displayName?.toLowerCase().includes("guest")
@@ -118,54 +116,44 @@ const Archive = () => {
 
   // 🔹 Restore user (move back to users)
   const handleRestoreUser = async (user) => {
-  try {
-    // Remove from archive
-    await deleteDoc(doc(db, "archive", userId));
+    try {
+      // Recreate in users
+      await setDoc(doc(db, "users", user.id), {
+        ...user,
+        isActive: true,
+        archived: false,
+        restoredAt: serverTimestamp(),
+      }, { merge: true });
 
-    // Optional: update main users collection
-    await updateDoc(doc(db, "users", userId), {
-      deactivatedByAdmin: false,
-    });
+      // Delete from archiveUsers
+      await deleteDoc(doc(db, "archiveUsers", user.id));
 
-    // Optional: add to activeUsers list
-    await setDoc(doc(db, "activeUsers", userId), {
-      userId,
-      restoredAt: new Date(),
-    });
+      // UI
+      setArchiveUsers((prev) => prev.filter((u) => u.id !== user.id));
+      setUsers((prev) => [...prev, { ...user, isActive: true }]);
 
-    console.log("✅ User restored successfully.");
-  } catch (err) {
-    console.error("❌ Failed to restore user:", err.message);
-  }
-};
-
+      showNotification(`${user.fullName || user.displayName || user.email} restored successfully!`);
+    } catch (error) {
+      console.error("Error restoring user:", error);
+      showNotification("Failed to restore user.");
+    }
+  };
 
   // 🔹 Restore report
-const handleRestoreReport = async (report) => {
-  try {
-    // Restore in main 'users' or 'reports' collection
-    await setDoc(
-      doc(db, "users", report.userId), // or "reports" if restoring a report
-      {
-        email: report.email || "",
-        name: report.name || "",
-        userId: report.userId,
-        isActive: true, // crucial for login
-        restoredAt: new Date(),
-      },
-      { merge: true }
-    );
+  const handleRestoreReport = async (report) => {
+    try {
+      await setDoc(doc(db, "reports", report.id), { ...report, restoredAt: serverTimestamp() }, { merge: true });
 
-    // Remove from archive
-    await deleteDoc(doc(db, "archive", report.userId)); // same doc ID as archived
+      await deleteDoc(doc(db, "archivedReports", report.id));
 
-    alert("✅ Restored successfully!");
-  } catch (err) {
-    console.error("❌ Restore failed:", err);
-    alert("Failed to restore.");
-  }
-};
+      setArchivedReports((prev) => prev.filter((r) => r.id !== report.id));
 
+      showNotification("Report restored successfully!");
+    } catch (err) {
+      console.error("Error restoring report:", err);
+      showNotification("Failed to restore report.");
+    }
+  };
 
   const formatTimestamp = (timestamp) => {
     if (!timestamp) return "";

@@ -16,7 +16,7 @@ import {
   FiEyeOff,
 } from "react-icons/fi";
 import { motion, AnimatePresence } from "framer-motion";
-import { auth, db } from "../firebase";
+import { auth, db, googleProvider, serverTimestamp } from "../firebase";
 import {
   collection,
   query,
@@ -26,11 +26,13 @@ import {
   doc,
   setDoc,
   deleteDoc,
-  updateDoc,
-  reauthenticateWithPopup,
-  deleteUser,
 } from "firebase/firestore";
-import { reauthenticateWithCredential, GoogleAuthProvider } from "firebase/auth";
+import {
+  signOut,
+  reauthenticateWithPopup,
+  reauthenticateWithCredential,
+  EmailAuthProvider,
+} from "firebase/auth";
 
 const LS_PROFILE = "brgy_profile_data";
 
@@ -236,7 +238,7 @@ export default function Profile() {
 
   const formatTimestamp = (timestamp) => (timestamp ? new Date(timestamp).toLocaleString() : "—");
 
-  // Updated deletion logic
+  // Updated soft deletion logic
   const onDelete = async () => {
     try {
       // Delete all user's reports
@@ -249,33 +251,38 @@ export default function Profile() {
         await deleteDoc(doc(db, "archives", archive.id));
       }
 
-      // Handle auth deletion based on login type
-      if (currentUser && profile.loginType === "email") {
-        // For email, reauth with password and delete
-        const credential = await signInWithEmailAndPassword(auth, profile.email, deletePwd);
-        await deleteUser(currentUser);
-      } else if (currentUser && profile.loginType === "google") {
-        // For Google, reauth with Google and delete
-        const provider = new GoogleAuthProvider();
-        await reauthenticateWithPopup(currentUser, provider);
-        await deleteUser(currentUser);
+      // Archive user (for non-guests)
+      const userId = profile.userId;
+      const userData = {
+        ...profile,
+        archivedAt: serverTimestamp(),
+        isActive: false,
+      };
+      await setDoc(doc(db, "archiveUsers", userId), userData, { merge: true });
+
+      // Delete from users
+      await deleteDoc(doc(db, "users", userId));
+
+      // Sign out if authenticated
+      if (currentUser) {
+        await signOut(auth);
       }
-      // For guest/create (if no currentUser), skip auth deletion
 
       // Remove local storage
       localStorage.removeItem(LS_PROFILE);
 
-      triggerToast("Account deleted successfully ✅");
+      triggerToast("Account archived successfully ✅");
 
       // Redirect to login
       navigate("/login");
     } catch (err) {
       console.error(err);
-      setDeleteError("Failed to delete account. Re-login and try again.");
+      setDeleteError("Failed to archive account. Try again.");
     }
   };
 
   const shouldShowPasswordFields = ["email", "create"].includes(profile.loginType);
+  const hasPassword = shouldShowPasswordFields && !!profile.password;
 
   return (
     <div className="min-h-screen bg-[var(--color-secondary)] text-[var(--color-text)]">
@@ -632,10 +639,12 @@ export default function Profile() {
               </h2>
               <p className="text-sm text-black/70 mb-4">
                 {profile.loginType === "google"
-                  ? "Sign in with Google to confirm."
-                  : "Please enter your password to confirm deletion."}
+                  ? "Re-authenticate with Google to confirm."
+                  : hasPassword
+                  ? "Please enter your password to confirm deletion."
+                  : "Please confirm to proceed with deletion."}
               </p>
-              {profile.loginType === "email" || profile.loginType === "create" ? (
+              {hasPassword && (
                 <div className="relative mb-3">
                   <input
                     type={showDeletePwd ? "text" : "password"}
@@ -652,7 +661,7 @@ export default function Profile() {
                     {showDeletePwd ? <FiEyeOff /> : <FiEye />}
                   </button>
                 </div>
-              ) : null}
+              )}
               {deleteError && (
                 <p className="text-sm text-red-600 mb-3">{deleteError}</p>
               )}
@@ -665,28 +674,37 @@ export default function Profile() {
                 </button>
                 <button
                   onClick={async () => {
-                    if (profile.loginType === "google") {
-                      try {
-                        const provider = new GoogleAuthProvider();
-                        await reauthenticateWithPopup(currentUser, provider);
-                        onDelete();
-                      } catch (err) {
-                        setDeleteError("Google reauthentication failed.");
+                    if (profile.loginType === "guest") {
+                      triggerToast("Guests cannot delete their account.");
+                      setShowConfirmDelete(false);
+                      return;
+                    }
+                    try {
+                      if (currentUser) {
+                        if (profile.loginType === "google") {
+                          await reauthenticateWithPopup(currentUser, googleProvider);
+                        } else if (hasPassword) {
+                          const credential = EmailAuthProvider.credential(
+                            profile.email,
+                            deletePwd
+                          );
+                          await reauthenticateWithCredential(currentUser, credential);
+                        }
                       }
-                    } else if (["email", "create"].includes(profile.loginType)) {
-                      if (deletePwd === profile.password) {
-                        onDelete();
-                      } else {
-                        setDeleteError("Incorrect password!");
-                      }
-                    } else {
-                      // For guest, no password needed
-                      onDelete();
+                      await onDelete();
+                      setShowConfirmDelete(false);
+                    } catch (err) {
+                      console.error(err);
+                      setDeleteError(
+                        profile.loginType === "google"
+                          ? "Google reauthentication failed."
+                          : "Incorrect password or reauthentication failed."
+                      );
                     }
                   }}
                   className="px-4 py-2 rounded-xl bg-red-600 text-white hover:bg-red-700"
                 >
-                  Confirm Delete
+                  {profile.loginType === "google" ? "Re-authenticate" : "Confirm Delete"}
                 </button>
               </div>
             </motion.div>
@@ -724,7 +742,7 @@ function StatPill({ label, value }) {
 function EmptyState() {
   return (
     <div className="px-6 py-12 text-center">
-      <div className="mx-auto h-12 w-24 rounded-full grid place-items-center bg-[var(--color-secondary)] text-[var(--color-primary)] ring-1 ring-black/10">
+      <div className="mx-auto h-12 w-12 rounded-full grid place-items-center bg-[var(--color-secondary)] text-[var(--color-primary)] ring-1 ring-black/10">
         <FiAlertTriangle />
       </div>
       <h4 className="mt-3 text-lg font-semibold text-[var(--color-primary)]">
