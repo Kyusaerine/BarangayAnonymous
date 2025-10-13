@@ -235,19 +235,19 @@ export default function Profile() {
   // Add this inside your Profile component, before return()
 const onDelete = async () => {
   try {
-    // Delete all user's reports
+    // Delete user's reports
     for (const post of posts) {
       await deleteDoc(doc(db, "reports", post.id));
     }
 
-    // Delete all archives
+    // Delete user's archives
     for (const archive of archives) {
       await deleteDoc(doc(db, "archives", archive.id));
     }
 
-    // Delete user from Firebase Auth if email/login type
+    // Delete from Firebase Auth
     if (profile.loginType === "email" && currentUser) {
-      await currentUser.delete(); // deletes user account in Firebase Auth
+      await currentUser.delete();
     }
 
     // Remove local storage
@@ -255,8 +255,15 @@ const onDelete = async () => {
 
     triggerToast("Account deleted successfully ✅");
 
-    // Redirect to login
-    navigate("/login");
+    // ✅ LOGIN ADMIN HERE
+    const adminEmail = "admin@example.com"; // CHANGE THIS
+    const adminPassword = "adminpassword"; // CHANGE THIS
+
+    await signInWithEmailAndPassword(auth, adminEmail, adminPassword);
+
+    // ✅ Redirect to admin dashboard
+    navigate("/login"); // Or wherever the admin should land
+
   } catch (err) {
     console.error(err);
     setDeleteError("Failed to delete account. Re-login and try again.");
