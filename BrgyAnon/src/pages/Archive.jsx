@@ -1,24 +1,9 @@
 // src/pages/Archive.jsx
 import React, { useEffect, useState } from "react";
-import {
-  collection,
-  deleteDoc,
-  setDoc,
-  doc,
-  serverTimestamp,
-  onSnapshot,
-  updateDoc,
-} from "firebase/firestore";
+import { collection, deleteDoc, setDoc, doc, serverTimestamp, onSnapshot, updateDoc, setDoc } from "firebase/firestore";
 import { db } from "../firebase";
-import {
-  FiArchive,
-  FiUser,
-  FiUsers,
-  FiMenu,
-  FiArrowLeftCircle,
-} from "react-icons/fi";
-
-
+import { FiArchive, FiUser, FiUsers, FiMenu,FiArrowLeftCircle } from "react-icons/fi";
+import { getAuth, createUserWithEmailAndPassword } from "firebase/auth";
 
 const Archive = () => {
   const [activeTab, setActiveTab] = useState("active");
@@ -115,25 +100,33 @@ const Archive = () => {
   };
 
   // 🔹 Restore user (move back to users)
-  const handleRestoreUser = async (user) => {
+const auth = getAuth();
+
+const handleRestoreUser = async (user) => {
   try {
-    // Remove from archive
-    await deleteDoc(doc(db, "archive", userId));
+    // 1️⃣ Restore Firestore document
+    await setDoc(
+      doc(db, "users", user.userId),
+      {
+        email: user.email || "",
+        name: user.name || "",
+        userId: user.userId,
+        isActive: true,
+        restoredAt: new Date(),
+      },
+      { merge: true }
+    );
 
-    // Optional: update main users collection
-    await updateDoc(doc(db, "users", userId), {
-      deactivatedByAdmin: false,
-    });
+    // 2️⃣ Recreate Firebase Auth user if needed
+    await createUserWithEmailAndPassword(auth, user.email, "TempPassword123!");
 
-    // Optional: add to activeUsers list
-    await setDoc(doc(db, "activeUsers", userId), {
-      userId,
-      restoredAt: new Date(),
-    });
+    // 3️⃣ Remove from archive
+    await deleteDoc(doc(db, "archive", user.userId));
 
-    console.log("✅ User restored successfully.");
+    alert("✅ User restored successfully! (Temporary password set)");
   } catch (err) {
-    console.error("❌ Failed to restore user:", err.message);
+    console.error("❌ Failed to restore user:", err);
+    alert("Failed to restore user.");
   }
 };
 
