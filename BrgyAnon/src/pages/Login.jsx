@@ -196,9 +196,7 @@ export default function Login() {
           setNotification("Login failed: " + err.message);
         }
         setNotificationType("danger");
-      }
-    }
-  };
+      }}};
 
   // ---------------------- GOOGLE LOGIN ----------------------
   const handleGoogleLogin = async () => {
