@@ -379,6 +379,7 @@ const Archive = () => {
               </div>
             )}
 
+
             {/* Archived Reports */}
             {activeTab === "reports" && (
               <div className="card shadow border-0 rounded-4">
