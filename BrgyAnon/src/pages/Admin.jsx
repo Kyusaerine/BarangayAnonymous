@@ -146,7 +146,15 @@ export default function Admin() {
     persist(next);
   };
 
-  const acceptReport = (id) => setStatus(id, "Received");
+ const acceptReport = (id) => {
+    setStatus(id, "Received");
+    showToast("✅ Report accepted successfully!");
+  };
+
+  const markResolved = (id) => {
+    setStatus(id, "Resolved");
+    showToast("🟢 Report marked as resolved.");
+  };
 
   const rejectReport = (post, reason) => {
     const next = posts.map((p) =>
@@ -160,15 +168,7 @@ export default function Admin() {
         : p
     );
     persist(next);
-  };
-
-  const markResolved = (id) => {
-    const next = posts.map((p) =>
-      p.id === id
-        ? { ...p, status: "Resolved", statusUpdatedAt: Date.now() }
-        : p
-    );
-    persist(next);
+    showToast("❌ Report rejected.");
   };
 
   const handleLogout = () => {
@@ -485,9 +485,10 @@ function ReportRow({ post, onAccept, onReject, onUpdate, onResolved, onView }) {
   const awaiting = current === "Awaiting Approval";
   const inProgress = current === "In Progress";
   const resolved = current === "Resolved";
+  const rejected = current === "Rejected";
   const unchanged = nextStatus === current;
 
-  return (
+return (
     <article className="rounded-2xl bg-white ring-1 ring-black/10 p-4">
       <div className="flex flex-col gap-3 md:flex-row md:justify-between">
         {/* Left info */}
@@ -498,8 +499,13 @@ function ReportRow({ post, onAccept, onReject, onUpdate, onResolved, onView }) {
               <FiMapPin className="opacity-70" /> {post.location}
             </div>
           )}
+          {post.desc && (
+            <p className="mt-1 text-sm text-slate-800 line-clamp-2">
+              {post.desc}
+            </p>
+          )}
           <div className="mt-1 text-xs text-slate-500 flex items-center gap-1">
-            <FiClock className="opacity-70" />{" "}
+            <FiClock className="opacity-70" />
             {new Date(post.createdAt).toLocaleString()}
           </div>
           <div className="mt-2">
@@ -510,12 +516,7 @@ function ReportRow({ post, onAccept, onReject, onUpdate, onResolved, onView }) {
 
         {/* Right side actions */}
         <div className="flex flex-wrap items-center gap-2 md:justify-end">
-          {resolved ? (
-            <div className="text-center text-sm text-slate-600 font-medium bg-slate-100 rounded-xl px-4 py-2">
-              🟢 This report is Resolved
-          {rejected}
-            </div>
-          ) : awaiting ? (
+          {awaiting ? (
             <>
               <button
                 onClick={onAccept}
@@ -538,11 +539,36 @@ function ReportRow({ post, onAccept, onReject, onUpdate, onResolved, onView }) {
               >
                 ✅ Mark as Resolved
               </button>
+
               <button
                 onClick={onView}
-                className="inline-flex gap-2 w-24 justify-center px-3 py-2 rounded-xl bg-violet-600 text-white hover:bg-violet-700"
+                className="inline-flex items-center gap-2 rounded-xl px-3 py-2 font-semibold bg-violet-600 text-white hover:bg-violet-700"
               >
-                <FiEye /> View
+                <FiEye /> View Details
+              </button>
+            </>
+          ) : resolved ? (
+            <>
+              <div className="text-center text-sm text-slate-600 font-medium bg-slate-100 rounded-xl px-4 py-2">
+                🟢 This report is Resolved
+              </div>
+              <button
+                onClick={onView}
+                className="inline-flex items-center gap-2 rounded-xl px-3 py-2 font-semibold bg-violet-600 text-white hover:bg-violet-700"
+              >
+                <FiEye /> View Details
+              </button>
+            </>
+          ) : rejected ? (
+            <>
+              <div className="text-center text-sm text-rose-600 font-medium bg-rose-100 rounded-xl px-4 py-2">
+                ❌ This report is Rejected
+              </div>
+              <button
+                onClick={onView}
+                className="inline-flex items-center gap-2 rounded-xl px-3 py-2 font-semibold bg-violet-600 text-white hover:bg-violet-700"
+              >
+                <FiEye /> View Details
               </button>
             </>
           ) : (
@@ -570,9 +596,9 @@ function ReportRow({ post, onAccept, onReject, onUpdate, onResolved, onView }) {
               </button>
               <button
                 onClick={onView}
-                className="inline-flex gap-2 w-24 justify-center px-3 py-2 rounded-xl bg-violet-600 text-white hover:bg-violet-700"
+                className="inline-flex items-center gap-2 rounded-xl px-3 py-2 font-semibold bg-violet-600 text-white hover:bg-violet-700"
               >
-                <FiEye /> View
+                <FiEye /> View Details
               </button>
             </>
           )}
@@ -621,6 +647,7 @@ function StatusBadge({ status, lightCard = false }) {
     </span>
   );
 }
+
 
 function Modal({ title, children, onClose }) {
   return (
