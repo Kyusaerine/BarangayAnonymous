@@ -1,5 +1,3 @@
-//PROFILE
-
 // src/pages/Profile.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
@@ -18,18 +16,31 @@ import {
   FiEyeOff,
 } from "react-icons/fi";
 import { motion, AnimatePresence } from "framer-motion";
-import { auth, db } from "../firebase"; // make sure db is imported
-import { doc, setDoc, deleteDoc } from "firebase/firestore";
-import { EmailAuthProvider, reauthenticateWithCredential, GoogleAuthProvider} from "firebase/auth";
+import { auth, db } from "../firebase";
+import {
+  collection,
+  query,
+  where,
+  onSnapshot,
+  orderBy,
+  doc,
+  setDoc,
+  deleteDoc,
+} from "firebase/firestore";
+import {
+  EmailAuthProvider,
+  reauthenticateWithCredential,
+  reauthenticateWithPopup,
+  googleProvider,
+  deleteUser,
+} from "firebase/auth";
 
 const LS_PROFILE = "brgy_profile_data";
-const LS_POSTS = "brgy_posts";
-const LS_ARCHIVES = "brgy_archives";
 
 export default function Profile() {
   const navigate = useNavigate();
-  
-  const currentUserId = auth.currentUser?.uid || "guest";
+  const currentUser = auth.currentUser;
+  const currentUserId = currentUser?.uid || JSON.parse(localStorage.getItem(LS_PROFILE) || "{}")?.userId || "guest";
 
   const [profile, setProfile] = useState(() => {
     try {
@@ -52,80 +63,84 @@ export default function Profile() {
   const [showEdit, setShowEdit] = useState(false);
   const [showConfirmDeleteReport, setShowConfirmDeleteReport] = useState(false);
   const [reportToDelete, setReportToDelete] = useState(null);
+  const [showConfirmClear, setShowConfirmClear] = useState(false);
 
-  // ===== DELETE ACCOUNT STATES =====
   const [showDelete, setShowDelete] = useState(false);
   const [showConfirmDelete, setShowConfirmDelete] = useState(false);
   const [deletePwd, setDeletePwd] = useState("");
   const [showDeletePwd, setShowDeletePwd] = useState(false);
   const [deleteError, setDeleteError] = useState("");
 
-  // Load profile & sync with auth
+  // Load profile on auth change
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged((user) => {
+      const savedProfile = JSON.parse(localStorage.getItem(LS_PROFILE) || "{}");
       if (user) {
-        const savedProfile = JSON.parse(localStorage.getItem(LS_PROFILE) || "{}");
-        if (savedProfile.userId !== user.uid) {
-          const newProfile = {
-            ...savedProfile,
-            userId: user.uid,
-            email: user.email || savedProfile.email || "",
-          };
-          localStorage.setItem(LS_PROFILE, JSON.stringify(newProfile));
-          setProfile(newProfile);
-          setForm(newProfile);
-        }
+        const updatedProfile = {
+          ...savedProfile,
+          userId: user.uid,
+          email: user.email || savedProfile.email || "",
+          fullName: savedProfile.fullName || user.displayName || "",
+          googleName: savedProfile.googleName || user.displayName || "",
+          profileImage: savedProfile.profileImage || user.photoURL || "",
+        };
+        localStorage.setItem(LS_PROFILE, JSON.stringify(updatedProfile));
+        setProfile(updatedProfile);
+        setForm(updatedProfile);
+      } else if (savedProfile.loginType === "guest") {
+        setProfile(savedProfile);
+        setForm(savedProfile);
+      } else {
+        localStorage.removeItem(LS_PROFILE);
+        navigate("/auth");
       }
     });
     return () => unsubscribe();
-  }, []);
+  }, [navigate]);
 
-  // Sync posts & archives when profile changes
+  // Load posts from Firestore
   useEffect(() => {
-    const savedPosts = JSON.parse(localStorage.getItem(LS_POSTS) || "[]");
-    const updatedPosts = savedPosts.map((p) =>
-      p.userId === currentUserId
-        ? { ...p, userFullName: profile.fullName, userProfileImage: profile.profileImage }
-        : p
+    if (!currentUserId) return;
+    const q = query(
+      collection(db, "reports"),
+      where("userId", "==", currentUserId),
+      orderBy("createdAt", "desc")
     );
-    localStorage.setItem(LS_POSTS, JSON.stringify(updatedPosts));
-    setPosts(updatedPosts);
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const userPosts = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+      setPosts(userPosts);
+    });
+    return () => unsubscribe();
+  }, [currentUserId]);
 
-    const savedArchives = JSON.parse(localStorage.getItem(LS_ARCHIVES) || "[]");
-    const updatedArchives = savedArchives.map((a) =>
-      a.userId === currentUserId
-        ? { ...a, userFullName: profile.fullName, userProfileImage: profile.profileImage }
-        : a
+  // Load archives from Firestore
+  useEffect(() => {
+    if (!currentUserId) return;
+    const q = query(
+      collection(db, "archives"),
+      where("userId", "==", currentUserId),
+      orderBy("archivedAt", "desc")
     );
-    localStorage.setItem(LS_ARCHIVES, JSON.stringify(updatedArchives));
-    setArchives(updatedArchives);
-  }, [profile, currentUserId]);
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const userArchives = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+      setArchives(userArchives);
+    });
+    return () => unsubscribe();
+  }, [currentUserId]);
 
   const myPosts = useMemo(() => {
     const archivedIds = new Set(archives.map((a) => a.id));
-    return posts.filter((p) => p.userId === currentUserId && !archivedIds.has(p.id));
-  }, [posts, archives, currentUserId]);
+    return posts.filter((p) => !archivedIds.has(p.id));
+  }, [posts, archives]);
 
-const displayName = useMemo(() => {
-  if (profile.loginType === "google") {
-    if (profile.googleName) return profile.googleName;
-    if (profile.fullName) return profile.fullName;
-    if (profile.displayName) return profile.displayName; // fallback
-  }
-    if (profile.loginType === "create") {
-    if (profile.fullName) return profile.fullName;
-    const fullName = `${profile.firstName || ""} ${profile.lastName || ""}`.trim();
-    if (fullName) return fullName;
-    }
-  if (profile.loginType === "email") {
-    if (profile.fullName) return profile.fullName;
-    const fullName = `${profile.firstName || ""} ${profile.lastName || ""}`.trim();
-    if (fullName) return fullName;
-  }
-  if (profile.loginType === "guest" && profile.guestName) return profile.guestName;
-  return "User";
-}, [profile]);
-
+  const displayName = useMemo(() => {
+    if (profile.loginType === "google")
+      return profile.googleName || profile.fullName || "User";
+    if (profile.loginType === "email" || profile.loginType === "create")
+      return profile.fullName || `${profile.firstName || ""} ${profile.lastName || ""}`.trim() || "User";
+    if (profile.loginType === "guest") return profile.guestName || "Guest";
+    return "User";
+  }, [profile]);
 
   const lastSubmitted = useMemo(() => {
     if (myPosts.length === 0) return "—";
@@ -152,106 +167,159 @@ const displayName = useMemo(() => {
     reader.readAsDataURL(file);
   };
 
-  const onSubmit = (e) => {
-  e.preventDefault();
+  const onSubmit = async (e) => {
+    e.preventDefault();
+    setError("");
 
-  if (profile.loginType === "email") {
-    // Validate password is not empty
-    if (!form.password) {
-      setError("Password cannot be empty!");
-      return;
+    // Validate password for email login
+    if (profile.loginType === "email" && form.password) {
+      if (form.password !== confirmPwd) {
+        setError("Passwords do not match!");
+        return;
+      }
+      try {
+        const credential = EmailAuthProvider.credential(profile.email, form.password);
+        await reauthenticateWithCredential(auth.currentUser, credential);
+      } catch (err) {
+        setError("Invalid password. Please try again.");
+        return;
+      }
     }
 
-    // Validate confirm password
-    if (form.password !== confirmPwd) {
-      setError("Passwords do not match!");
-      return;
+    const fullName = `${form.firstName || ""} ${form.middleName || ""} ${form.lastName || ""}`.trim();
+    const updatedProfile = {
+      ...profile,
+      userId: profile.userId || currentUserId,
+      fullName: fullName || profile.fullName,
+      firstName: form.firstName || profile.firstName || "",
+      middleName: form.middleName || profile.middleName || "",
+      lastName: form.lastName || profile.lastName || "",
+      profileImage: form.profileImage || profile.profileImage || "",
+      lastLogin: profile.lastLogin || new Date().toLocaleString(),
+      ...(profile.loginType === "email" && form.password ? { password: form.password } : {}),
+    };
+
+    try {
+      // Update Firestore for non-guest users
+      if (profile.loginType !== "guest") {
+        await setDoc(
+          doc(db, "users", currentUserId),
+          {
+            fullName: updatedProfile.fullName,
+            firstName: updatedProfile.firstName,
+            middleName: updatedProfile.middleName,
+            lastName: updatedProfile.lastName,
+            profileImage: updatedProfile.profileImage,
+            lastLogin: new Date().toLocaleString(),
+          },
+          { merge: true }
+        );
+      } else {
+        await setDoc(
+          doc(db, "guests", currentUserId),
+          {
+            fullName: updatedProfile.fullName,
+            firstName: updatedProfile.firstName,
+            middleName: updatedProfile.middleName,
+            lastName: updatedProfile.lastName,
+            profileImage: updatedProfile.profileImage,
+            lastLogin: new Date().toLocaleString(),
+          },
+          { merge: true }
+        );
+      }
+
+      localStorage.setItem(LS_PROFILE, JSON.stringify(updatedProfile));
+      setProfile(updatedProfile);
+      triggerToast("Profile updated successfully ✅");
+      setShowEdit(false);
+    } catch (err) {
+      console.error(err);
+      setError("Failed to update profile. Try again.");
     }
-  }
-
-  setError("");
-
-  const fullName = `${form.firstName || ""} ${form.middleName || ""} ${form.lastName || ""}`.trim();
-  const updatedProfile = {
-    ...profile,
-    userId: profile.userId || currentUserId,
-    fullName: fullName || profile.fullName,
-    firstName: form.firstName || profile.firstName || "",
-    middleName: form.middleName || profile.middleName || "",
-    lastName: form.lastName || profile.lastName || "",
-    profileImage: form.profileImage || profile.profileImage || "",
-    lastLogin: profile.lastLogin || new Date().toLocaleString(),
-    password: form.password || profile.password || "",
   };
 
-  try {
-    localStorage.setItem(LS_PROFILE, JSON.stringify(updatedProfile));
-    setProfile(updatedProfile);
-
-    const updatedPosts = posts.map((p) =>
-      p.userId === currentUserId
-        ? { ...p, userFullName: updatedProfile.fullName, userProfileImage: updatedProfile.profileImage }
-        : p
-    );
-    setPosts(updatedPosts);
-    localStorage.setItem(LS_POSTS, JSON.stringify(updatedPosts));
-
-    const updatedArchives = archives.map((a) =>
-      a.userId === currentUserId
-        ? { ...a, userFullName: updatedProfile.fullName, userProfileImage: updatedProfile.profileImage }
-        : a
-    );
-    setArchives(updatedArchives);
-    localStorage.setItem(LS_ARCHIVES, JSON.stringify(updatedArchives));
-
-    triggerToast("Profile updated successfully ✅");
-    setShowEdit(false);
-    setTimeout(() => window.dispatchEvent(new Event("storage")), 100);
-  } catch (err) {
-    console.error("Error updating profile:", err);
-    setError("Failed to update profile. Try again.");
-  }
-};
-
-
-  // ===== DELETE REPORT =====
   const deleteReport = (reportId) => {
     setReportToDelete(reportId);
     setShowConfirmDeleteReport(true);
   };
 
-const confirmDeleteReport = async () => {
-  if (!reportToDelete) return;
-  const report = posts.find((p) => p.id === reportToDelete);
-  if (!report) return;
+  const confirmDeleteReport = async () => {
+    if (!reportToDelete) return;
+    const report = posts.find((p) => p.id === reportToDelete);
+    if (!report) return;
+    try {
+      await setDoc(doc(db, "archives", report.id), { ...report, archivedAt: Date.now() });
+      await deleteDoc(doc(db, "reports", report.id));
+      setReportToDelete(null);
+      setShowConfirmDeleteReport(false);
+      triggerToast("Report deleted ✅");
+    } catch (err) {
+      console.error(err);
+      triggerToast("Failed to delete report ❌");
+    }
+  };
 
-  try {
-    // Move to archivedReports in Firestore
-    await setDoc(doc(db, "archivedUsers", userId), {
-      ...userData,
-      archivedAt: Date.now()
-    });
-    // Delete from activeReports in Firestore
-    await deleteDoc(doc(db, "activeReports", report.id));
+  const clearAllArchives = async () => {
+    try {
+      for (const archive of archives) {
+        await deleteDoc(doc(db, "archives", archive.id));
+      }
+      setArchives([]);
+      setShowConfirmClear(false);
+      triggerToast("All archives cleared ✅");
+    } catch (err) {
+      console.error(err);
+      triggerToast("Failed to clear archives ❌");
+    }
+  };
 
-    // Update local state and storage
-    const updatedArchives = [...archives, { ...report, archivedAt: Date.now() }];
-    setArchives(updatedArchives);
-    localStorage.setItem(LS_ARCHIVES, JSON.stringify(updatedArchives));
+  const onDelete = async () => {
+    setDeleteError("");
+    try {
+      // Reauthenticate based on login type
+      if (profile.loginType === "email" && currentUser) {
+        if (!deletePwd) {
+          setDeleteError("Please enter your password.");
+          return;
+        }
+        const credential = EmailAuthProvider.credential(profile.email, deletePwd);
+        await reauthenticateWithCredential(currentUser, credential);
+      } else if (profile.loginType === "google" && currentUser) {
+        await reauthenticateWithPopup(currentUser, googleProvider);
+      }
 
-    const updatedPosts = posts.filter((p) => p.id !== reportToDelete);
-    setPosts(updatedPosts);
-    localStorage.setItem(LS_POSTS, JSON.stringify(updatedPosts));
+      // Delete all user's reports
+      for (const post of posts) {
+        await deleteDoc(doc(db, "reports", post.id));
+      }
 
-    setReportToDelete(null);
-    setShowConfirmDeleteReport(false);
-    triggerToast("Account has been deleted");
-    window.dispatchEvent(new Event("storage"));
-  } catch (err) {
-    console.error("Error moving report:", err);
-    triggerToast("Failed to move report ❌");
-  }
-};
+      // Delete all archives
+      for (const archive of archives) {
+        await deleteDoc(doc(db, "archives", archive.id));
+      }
+
+      // Delete user data from Firestore
+      if (profile.loginType === "guest") {
+        await deleteDoc(doc(db, "guests", currentUserId));
+      } else {
+        await deleteDoc(doc(db, "users", currentUserId));
+        if (currentUser) {
+          await deleteUser(currentUser);
+        }
+      }
+
+      // Clear local storage
+      localStorage.removeItem(LS_PROFILE);
+
+      triggerToast("Account deleted successfully ✅");
+      navigate("/auth");
+    } catch (err) {
+      console.error(err);
+      setDeleteError("Failed to delete account: " + err.message);
+    }
+  };
+
   const formatTimestamp = (timestamp) => (timestamp ? new Date(timestamp).toLocaleString() : "—");
 
   return (
@@ -280,7 +348,7 @@ const confirmDeleteReport = async () => {
                   onClick={() => {
                     setShowEdit(true);
                     setForm(profile);
-                    setConfirmPwd(profile.password || "");
+                    setConfirmPwd("");
                     setShowPwd(false);
                     setShowConfirmPwd(false);
                     setDropdownOpen(false);
@@ -290,7 +358,10 @@ const confirmDeleteReport = async () => {
                   Edit Profile
                 </button>
                 <button
-                  onClick={() => setShowDelete(true)}
+                  onClick={() => {
+                    setShowDelete(true);
+                    setDropdownOpen(false);
+                  }}
                   className="w-full text-left px-4 py-2 hover:bg-red-50 text-red-600 flex items-center gap-2"
                 >
                   <FiTrash2 /> Delete Account
@@ -318,7 +389,7 @@ const confirmDeleteReport = async () => {
               {displayName}
             </h1>
             <p className="mt-1 text-white/85">Your Barangay Portal profile</p>
-
+            
             <div className="mt-6 grid grid-cols-1 sm:grid-cols-3 gap-3 max-w-2xl mx-auto">
               <StatPill label="Reports Submitted" value={myPosts.length} />
               <StatPill label="Last Submitted" value={formatTimestamp(lastSubmitted)} />
@@ -351,14 +422,20 @@ const confirmDeleteReport = async () => {
                           {p.issue || "Issue"}
                         </h3>
                         <div className="mt-1 text-xs text-black/60 inline-flex items-center gap-1">
-                          <FiClock className="opacity-70" /> {formatTimestamp(p.createdAt)}
+                          <FiClock className="opacity-70" />
+                          {formatTimestamp(p.createdAt)}
                         </div>
                         {p.location && (
                           <div className="mt-1 text-sm text-black/70 inline-flex items-center gap-1">
-                            <FiMapPin className="opacity-70" /> {p.location}
+                            <FiMapPin className="opacity-70" />
+                            {p.location}
                           </div>
                         )}
-                        {p.desc && <p className="mt-3 text-sm mx-auto max-w-xl">{p.desc}</p>}
+                        {p.desc && (
+                          <p className="mt-3 text-sm mx-auto max-w-xl">
+                            {p.desc}
+                          </p>
+                        )}
                         {p.imageUrl && (
                           <div className="mt-3 w-full">
                             <img
@@ -386,139 +463,158 @@ const confirmDeleteReport = async () => {
         </section>
       </div>
 
+      {/* Confirm Clear All Archives Modal */}
+      <AnimatePresence>
+        {showConfirmClear && (
+          <motion.div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+            <motion.div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 text-center">
+              <FiTrash2 className="mx-auto text-4xl text-red-500 mb-3" />
+              <h2 className="text-xl font-bold mb-2 text-red-600">
+                Clear All Archives?
+              </h2>
+              <p className="text-sm text-black/70 mb-4">
+                This will permanently delete all archived reports.
+              </p>
+              <div className="flex gap-3 justify-center">
+                <button
+                  onClick={() => setShowConfirmClear(false)}
+                  className="px-4 py-2 rounded-xl bg-gray-200 hover:bg-gray-300"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={clearAllArchives}
+                  className="px-4 py-2 rounded-xl bg-red-600 text-white hover:bg-red-700"
+                >
+                  Yes, Clear All
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* EDIT PROFILE MODAL */}
       <AnimatePresence>
         {showEdit && (
-          <motion.div
-            className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-          >
-            <motion.div
-              className="bg-white rounded-3xl shadow-2xl w-full max-w-lg p-6 sm:p-8 relative"
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              transition={{ duration: 0.2 }}
-            >
+          <motion.div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50">
+            <motion.div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-6 relative">
               <button
                 onClick={() => setShowEdit(false)}
                 className="absolute top-4 right-4 text-black/60 hover:text-black"
               >
-                <FiX size={22} />
+                <FiX size={20} />
               </button>
-
-              <h2 className="text-2xl font-bold text-center mb-6 text-[var(--color-primary)]">
+              <h2 className="text-xl font-bold text-center mb-4 text-[var(--color-primary)]">
                 Edit Profile
               </h2>
-
-              <form onSubmit={onSubmit} className="space-y-5">
+              <form className="space-y-4" onSubmit={onSubmit}>
                 {/* Upload Image */}
-                <div className="flex flex-col items-center text-center">
-                  <div className="relative">
-                    <div className="h-24 w-24 rounded-full overflow-hidden ring-2 ring-[var(--color-primary)]">
-                      {form.profileImage ? (
-                        <img
-                          src={form.profileImage}
-                          alt="Profile Preview"
-                          className="object-cover h-full w-full"
-                        />
-                      ) : (
-                        <div className="h-full w-full grid place-items-center bg-[var(--color-secondary)] text-[var(--color-primary)]">
-                          <FiUser size={32} />
-                        </div>
-                      )}
-                    </div>
-                    <label className="absolute -bottom-2 right-0 bg-[var(--color-primary)] text-white rounded-full p-2 cursor-pointer hover:bg-[var(--color-primary-hover)]">
-                      <FiImage size={16} />
-                      <input
-                        type="file"
-                        accept="image/*"
-                        onChange={onImageUpload}
-                        className="hidden"
-                      />
-                    </label>
-                  </div>
-                  <p className="text-xs text-black/60 mt-2">Click the icon to update photo</p>
+                <div>
+                  <label className="text-sm font-medium mb-1 inline-flex items-center gap-2">
+                    <FiImage className="opacity-80" /> Profile Photo
+                  </label>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={onImageUpload}
+                    className="w-full text-sm"
+                  />
+                  {form.profileImage && (
+                    <img
+                      src={form.profileImage}
+                      alt="Preview"
+                      className="mt-2 h-20 w-20 object-cover rounded-full ring-1 ring-black/10"
+                    />
+                  )}
                 </div>
 
-                {/* Name Fields */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium mb-1">First Name</label>
+                    <label className="block text-sm font-medium">
+                      First Name
+                    </label>
                     <input
                       type="text"
                       name="firstName"
                       value={form.firstName || ""}
                       onChange={onChange}
-                      className="w-full rounded-xl bg-[var(--color-secondary)] px-4 py-2.5 outline-none ring-1 ring-black/10 focus:ring-2 focus:ring-[var(--color-primary)]"
+                      className="w-full rounded-xl bg-[var(--color-secondary)] px-4 py-3 outline-none ring-1 ring-black/10 focus:ring-2 focus:ring-[var(--color-primary)]"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium mb-1">Middle Name</label>
+                    <label className="block text-sm font-medium">
+                      Middle Name
+                    </label>
                     <input
                       type="text"
                       name="middleName"
                       value={form.middleName || ""}
                       onChange={onChange}
-                      className="w-full rounded-xl bg-[var(--color-secondary)] px-4 py-2.5 outline-none ring-1 ring-black/10 focus:ring-2 focus:ring-[var(--color-primary)]"
+                      className="w-full rounded-xl bg-[var(--color-secondary)] px-4 py-3 outline-none ring-1 ring-black/10 focus:ring-2 focus:ring-[var(--color-primary)]"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium mb-1">Last Name</label>
+                    <label className="block text-sm font-medium">
+                      Last Name
+                    </label>
                     <input
                       type="text"
                       name="lastName"
                       value={form.lastName || ""}
                       onChange={onChange}
-                      className="w-full rounded-xl bg-[var(--color-secondary)] px-4 py-2.5 outline-none ring-1 ring-black/10 focus:ring-2 focus:ring-[var(--color-primary)]"
+                      className="w-full rounded-xl bg-[var(--color-secondary)] px-4 py-3 outline-none ring-1 ring-black/10 focus:ring-2 focus:ring-[var(--color-primary)]"
                     />
                   </div>
                 </div>
 
-                {/* Passwords */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="relative">
-                    <label className="block text-sm font-medium mb-1">Password</label>
-                    <input
-                      type={showPwd ? "text" : "password"}
-                      name="password"
-                      value={form.password}
-                      onChange={onChange}
-                      className="w-full rounded-xl bg-[var(--color-secondary)] px-4 py-2.5 pr-10 outline-none ring-1 ring-black/10 focus:ring-2 focus:ring-[var(--color-primary)]"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPwd((v) => !v)}
-                      className="absolute right-3 top-9 text-black/60 hover:text-black"
-                    >
-                      {showPwd ? <FiEyeOff /> : <FiEye />}
-                    </button>
-                  </div>
-                  <div className="relative">
-                    <label className="block text-sm font-medium mb-1">Confirm Password</label>
-                    <input
-                      type={showConfirmPwd ? "text" : "password"}
-                      value={confirmPwd}
-                      onChange={(e) => setConfirmPwd(e.target.value)}
-                      className="w-full rounded-xl bg-[var(--color-secondary)] px-4 py-2.5 pr-10 outline-none ring-1 ring-black/10 focus:ring-2 focus:ring-[var(--color-primary)]"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowConfirmPwd((v) => !v)}
-                      className="absolute right-3 top-9 text-black/60 hover:text-black"
-                    >
-                      {showConfirmPwd ? <FiEyeOff /> : <FiEye />}
-                    </button>
-                  </div>
-                </div>
+                {/* Password (only for email login) */}
+                {profile.loginType === "email" && (
+                  <>
+                    <div className="relative">
+                      <label className="block text-sm font-medium">Password</label>
+                      <input
+                        type={showPwd ? "text" : "password"}
+                        name="password"
+                        value={form.password || ""}
+                        onChange={onChange}
+                        className="w-full rounded-xl bg-[var(--color-secondary)] px-4 py-3 pr-12 outline-none ring-1 ring-black/10 focus:ring-2 focus:ring-[var(--color-primary)]"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPwd((v) => !v)}
+                        className="absolute right-3 top-8 p-1 text-black/60 hover:text-black"
+                      >
+                        {showPwd ? <FiEyeOff /> : <FiEye />}
+                      </button>
+                    </div>
 
-                {error && <p className="text-sm text-red-600 text-center">{error}</p>}
+                    <div className="relative">
+                      <label className="block text-sm font-medium">
+                        Confirm Password
+                      </label>
+                      <input
+                        type={showConfirmPwd ? "text" : "password"}
+                        value={confirmPwd}
+                        onChange={(e) => setConfirmPwd(e.target.value)}
+                        className="w-full rounded-xl bg-[var(--color-secondary)] px-4 py-3 pr-12 outline-none ring-1 ring-black/10 focus:ring-2 focus:ring-[var(--color-primary)]"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowConfirmPwd((v) => !v)}
+                        className="absolute right-3 top-8 p-1 text-black/60 hover:text-black"
+                      >
+                        {showConfirmPwd ? <FiEyeOff /> : <FiEye />}
+                      </button>
+                    </div>
+                  </>
+                )}
+
+                {error && <p className="text-sm text-red-600">{error}</p>}
 
                 <button
                   type="submit"
-                  className="w-full mt-2 rounded-xl px-4 py-3 font-semibold bg-[var(--color-primary)] text-white hover:bg-[var(--color-primary-hover)] transition"
+                  className="w-full rounded-xl px-4 py-3 font-semibold bg-[var(--color-primary)] text-white hover:bg-[var(--color-primary-hover)]"
                 >
                   Save Changes
                 </button>
@@ -528,61 +624,17 @@ const confirmDeleteReport = async () => {
         )}
       </AnimatePresence>
 
-      {/* DELETE REPORT CONFIRMATION MODAL */}
-      <AnimatePresence>
-        {showConfirmDeleteReport && (
-          <motion.div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-            <motion.div
-              className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 text-center"
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-            >
-              <FiTrash2 className="mx-auto text-4xl text-red-500 mb-3" />
-              <h2 className="text-xl font-bold mb-2 text-red-600">
-                Are you sure you want to delete this report?
-              </h2>
-              <p className="text-sm text-black/70 mb-4">
-                This report will be deleted.
-              </p>
-              <div className="flex gap-3 justify-center">
-                <button
-                  onClick={() => setShowConfirmDeleteReport(false)}
-                  className="px-4 py-2 rounded-xl bg-gray-200 hover:bg-gray-300"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={() => {
-                    setShowDelete(false);
-                    setShowConfirmDelete(true); // open password confirmation modal
-                  }}
-                  className="px-4 py-2 rounded-xl bg-red-600 text-white hover:bg-red-700"
-                >
-                  Yes, Delete
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-    {/* ===== DELETE ACCOUNT MODALS ===== */}
+      {/* DELETE ACCOUNT CONFIRM MODAL */}
       <AnimatePresence>
         {showDelete && (
           <motion.div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-            <motion.div
-              className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 text-center"
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-            >
+            <motion.div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 text-center">
               <FiTrash2 className="mx-auto text-4xl text-red-500 mb-3" />
               <h2 className="text-xl font-bold mb-2 text-red-600">
                 Delete Account?
               </h2>
               <p className="text-sm text-black/70 mb-4">
-                This will delete your account and posts. You will not be able to log in again.
+                This will permanently delete your profile and all reports.
               </p>
               <div className="flex gap-3 justify-center">
                 <button
@@ -595,6 +647,8 @@ const confirmDeleteReport = async () => {
                   onClick={() => {
                     setShowDelete(false);
                     setShowConfirmDelete(true);
+                    setDeletePwd("");
+                    setDeleteError("");
                   }}
                   className="px-4 py-2 rounded-xl bg-red-600 text-white hover:bg-red-700"
                 >
@@ -606,33 +660,46 @@ const confirmDeleteReport = async () => {
         )}
       </AnimatePresence>
 
+      {/* PASSWORD CONFIRM MODAL */}
       <AnimatePresence>
         {showConfirmDelete && (
           <motion.div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
             <motion.div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 text-center">
               <h2 className="text-lg font-bold mb-3 text-[var(--color-primary)]">
-                Confirm Password
+                Confirm Account Deletion
               </h2>
-              <p className="text-sm text-black/70 mb-4">
-                Please enter your password to confirm deletion.
-              </p>
-              <div className="relative mb-3">
-                <input
-                  type={showDeletePwd ? "text" : "password"}
-                  value={deletePwd}
-                  onChange={(e) => setDeletePwd(e.target.value)}
-                  className="w-full rounded-xl bg-[var(--color-secondary)] px-4 py-3 pr-12 outline-none ring-1 ring-black/10 focus:ring-2 focus:ring-[var(--color-primary)]"
-                  placeholder="Enter your password"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowDeletePwd((v) => !v)}
-                  className="absolute right-3 top-3 text-black/60 hover:text-black"
-                >
-                  {showDeletePwd ? <FiEyeOff /> : <FiEye />}
-                </button>
-              </div>
-              {deleteError && <p className="text-sm text-red-600 mb-3">{deleteError}</p>}
+              {profile.loginType === "email" ? (
+                <>
+                  <p className="text-sm text-black/70 mb-4">
+                    Please enter your password to confirm deletion.
+                  </p>
+                  <div className="relative mb-3">
+                    <input
+                      type={showDeletePwd ? "text" : "password"}
+                      value={deletePwd}
+                      onChange={(e) => setDeletePwd(e.target.value)}
+                      className="w-full rounded-xl bg-[var(--color-secondary)] px-4 py-3 pr-12 outline-none ring-1 ring-black/10 focus:ring-2 focus:ring-[var(--color-primary)]"
+                      placeholder="Enter your password"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowDeletePwd((v) => !v)}
+                      className="absolute right-3 top-3 text-black/60 hover:text-black"
+                    >
+                      {showDeletePwd ? <FiEyeOff /> : <FiEye />}
+                    </button>
+                  </div>
+                  {deleteError && (
+                    <p className="text-sm text-red-600 mb-3">{deleteError}</p>
+                  )}
+                </>
+              ) : (
+                <p className="text-sm text-black/70 mb-4">
+                  {profile.loginType === "google"
+                    ? "You will be prompted to re-authenticate with Google to confirm deletion."
+                    : "Confirm to delete your guest account."}
+                </p>
+              )}
               <div className="flex gap-3 justify-center">
                 <button
                   onClick={() => setShowConfirmDelete(false)}
@@ -640,49 +707,12 @@ const confirmDeleteReport = async () => {
                 >
                   Cancel
                 </button>
-<button
-  onClick={async () => {
-    try {
-      const user = auth.currentUser;
-      if (!user) throw new Error("No user logged in");
-
-      const userId = profile.userId || user.uid;
-
-      // --- Delete posts locally ---
-      const updatedPosts = posts.filter(p => p.userId !== userId);
-      setPosts(updatedPosts);
-      localStorage.setItem(LS_POSTS, JSON.stringify(updatedPosts));
-
-      // --- Delete posts in Firestore ---
-      const userPosts = posts.filter(p => p.userId === userId);
-      await Promise.all(userPosts.map(p => deleteDoc(doc(db, "activeReports", p.id))));
-
-      // --- Delete user in Firestore ---
-      await deleteDoc(doc(db, "activeUsers", userId));
-      await deleteDoc(doc(db, "users", userId));
-
-      // --- Clear profile locally ---
-      localStorage.removeItem(LS_PROFILE);
-
-      // --- Delete Firebase Auth user ---
-      await user.delete();
-
-      // --- Notify & redirect ---
-      triggerToast("Account & Posts Deleted ✅");
-      setTimeout(() => navigate("/login"), 500);
-
-    } catch (err) {
-      console.error("Error deleting account:", err);
-      triggerToast("Failed to delete account ❌");
-    }
-  }}
-  className="px-4 py-2 rounded-xl bg-red-600 text-white hover:bg-red-700"
->
-  Confirm Delete
-</button>
-
-
-
+                <button
+                  onClick={onDelete}
+                  className="px-4 py-2 rounded-xl bg-red-600 text-white hover:bg-red-700"
+                >
+                  Confirm Delete
+                </button>
               </div>
             </motion.div>
           </motion.div>
