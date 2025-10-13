@@ -415,12 +415,12 @@ const handleRestoreReport = async (report) => {
                               </td>
                               <td>
                                <button
-  className="btn btn-success btn-sm"
-  onClick={() => handleRestoreUser(user)}
->
-  Restore
-</button>
-
+                                  className="btn btn-success btn-sm"
+                                  disabled={report.isProcessing}
+                                  onClick={() => handleRestoreReport(report)}
+                                >
+                                  Restore
+                                </button>
                               </td>
                             </tr>
                           ))
