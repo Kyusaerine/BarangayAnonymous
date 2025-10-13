@@ -309,7 +309,7 @@ export default function Admin() {
 
           {/* Report list */}
           {filtered.length === 0 ? (
-            <div className="rounded-2xl bg-black/5 ring-1 ring-white/10 p-10 text-center text-white/70">
+            <div className="rounded-2xl bg-white/5 ring-1 ring-white/10 p-10 text-center text-white/70">
               No matching reports.
             </div>
           ) : (
@@ -530,6 +530,14 @@ return (
               >
                 <FiX /> Reject
               </button>
+
+              <button
+                onClick={onView}
+                className="px-3 py-2 rounded-xl text-sm bg-violet-200 text-violet-800 hover:bg-violet-300"
+              >
+                <FiEye className="inline mr-1" /> View Details
+              </button>
+              
             </>
           ) : inProgress ? (
             <>
