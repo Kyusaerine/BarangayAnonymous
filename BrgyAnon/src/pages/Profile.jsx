@@ -556,11 +556,13 @@ const onDelete = async () => {
                 {error && <p className="text-sm text-red-600">{error}</p>}
 
                 <button
-                  type="submit"
+                  type="button" // use "button" to avoid accidental form submission
+                  onClick={() => navigate("/login")}
                   className="w-full rounded-xl px-4 py-3 font-semibold bg-[var(--color-primary)] text-white hover:bg-[var(--color-primary-hover)]"
                 >
                   Save Changes
                 </button>
+
               </form>
             </motion.div>
           </motion.div>
