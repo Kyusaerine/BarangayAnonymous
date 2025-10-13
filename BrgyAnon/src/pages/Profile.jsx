@@ -1,3 +1,4 @@
+// src/pages/Profile.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
@@ -15,7 +16,7 @@ import {
   FiEyeOff,
 } from "react-icons/fi";
 import { motion, AnimatePresence } from "framer-motion";
-import { auth, db, googleProvider } from "../firebase";
+import { auth, db } from "../firebase";
 import {
   collection,
   query,
@@ -26,12 +27,6 @@ import {
   setDoc,
   deleteDoc,
 } from "firebase/firestore";
-import {
-  reauthenticateWithCredential,
-  EmailAuthProvider,
-  reauthenticateWithPopup,
-  signOut,
-} from "firebase/auth";
 
 const LS_PROFILE = "brgy_profile_data";
 
@@ -54,6 +49,7 @@ export default function Profile() {
   const [showConfirmPwd, setShowConfirmPwd] = useState(false);
   const [error, setError] = useState("");
   const [toast, setToast] = useState("");
+
   const [posts, setPosts] = useState([]);
   const [archives, setArchives] = useState([]);
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -61,6 +57,7 @@ export default function Profile() {
   const [showConfirmDeleteReport, setShowConfirmDeleteReport] = useState(false);
   const [reportToDelete, setReportToDelete] = useState(null);
   const [showConfirmClear, setShowConfirmClear] = useState(false);
+
   const [showDelete, setShowDelete] = useState(false);
   const [showConfirmDelete, setShowConfirmDelete] = useState(false);
   const [deletePwd, setDeletePwd] = useState("");
@@ -79,46 +76,32 @@ export default function Profile() {
                 ...savedProfile,
                 userId: user.uid,
                 email: user.email || savedProfile.email || "",
-                fullName: user.displayName || savedProfile.fullName || "",
               };
         localStorage.setItem(LS_PROFILE, JSON.stringify(updatedProfile));
         setProfile(updatedProfile);
         setForm(updatedProfile);
-      } else if (profile.loginType === "guest") {
-        // Allow guest users to stay without Firebase Auth
-        setProfile(profile);
-        setForm(profile);
-      } else {
-        localStorage.removeItem(LS_PROFILE);
-        navigate("/login");
       }
     });
     return () => unsubscribe();
-  }, [navigate, profile.loginType]);
+  }, []);
 
-  // Load posts from Firestore
+  // Load posts from Firestore (all reports of current user)
   useEffect(() => {
     if (!currentUserId) return;
-    const q = query(
-      collection(db, "reports"),
-      where("userId", "==", currentUserId),
-      orderBy("createdAt", "desc")
-    );
-    const unsubscribe = onSnapshot(
-      q,
-      (snapshot) => {
-        const userPosts = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
-        setPosts(userPosts);
-      },
-      (err) => {
-        console.error("Error fetching posts:", err);
-        setToast("Failed to load reports ❌");
-      }
-    );
+ const q = query(
+  collection(db, "reports"),
+  where("userId", "==", currentUserId),
+  orderBy("createdAt") // make sure all docs have this field
+);
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const userPosts = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+      setPosts(userPosts);
+    });
     return () => unsubscribe();
   }, [currentUserId]);
 
-  // Load archives from Firestore
+  // Load archives from Firestore (optional)
   useEffect(() => {
     if (!currentUserId) return;
     const q = query(
@@ -126,17 +109,10 @@ export default function Profile() {
       where("userId", "==", currentUserId),
       orderBy("archivedAt", "desc")
     );
-    const unsubscribe = onSnapshot(
-      q,
-      (snapshot) => {
-        const userArchives = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
-        setArchives(userArchives);
-      },
-      (err) => {
-        console.error("Error fetching archives:", err);
-        setToast("Failed to load archives ❌");
-      }
-    );
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const userArchives = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+      setArchives(userArchives);
+    });
     return () => unsubscribe();
   }, [currentUserId]);
 
@@ -148,14 +124,14 @@ export default function Profile() {
   const displayName = useMemo(() => {
     if (profile.loginType === "google")
       return profile.googleName || profile.fullName || profile.displayName || "User";
-    if (profile.loginType === "email") {
+    if (profile.loginType === "create" || profile.loginType === "email") {
       return (
         profile.fullName ||
         `${profile.firstName || ""} ${profile.lastName || ""}`.trim() ||
         "User"
       );
     }
-    if (profile.loginType === "guest") return profile.guestName || profile.fullName || "User";
+    if (profile.loginType === "guest") return profile.guestName || "User";
     return "User";
   }, [profile]);
 
@@ -180,14 +156,13 @@ export default function Profile() {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onloadend = () =>
-      setForm((f) => ({ ...f, profileImage: String(reader.result || "") }));
+    reader.onloadend = () => setForm((f) => ({ ...f, profileImage: String(reader.result || "") }));
     reader.readAsDataURL(file);
   };
 
-  const onSubmit = async (e) => {
+  const onSubmit = (e) => {
     e.preventDefault();
-    if (profile.loginType === "email" && form.password) {
+    if (profile.loginType === "email") {
       if (!form.password) {
         setError("Password cannot be empty!");
         return;
@@ -202,24 +177,23 @@ export default function Profile() {
     const updatedProfile = {
       ...profile,
       userId: profile.userId || currentUserId,
-      fullName: fullName || profile.fullName || "",
+      fullName: fullName || profile.fullName,
       firstName: form.firstName || profile.firstName || "",
       middleName: form.middleName || profile.middleName || "",
       lastName: form.lastName || profile.lastName || "",
       profileImage: form.profileImage || profile.profileImage || "",
       lastLogin: profile.lastLogin || new Date().toLocaleString(),
+      password: form.password || profile.password || "",
     };
 
     try {
       localStorage.setItem(LS_PROFILE, JSON.stringify(updatedProfile));
       setProfile(updatedProfile);
-      if (currentUserId !== "guest") {
-        await setDoc(doc(db, "users", currentUserId), updatedProfile, { merge: true });
-      }
+
       triggerToast("Profile updated successfully ✅");
       setShowEdit(false);
     } catch (err) {
-      console.error("Profile Update Error:", err);
+      console.error(err);
       setError("Failed to update profile. Try again.");
     }
   };
@@ -236,94 +210,63 @@ export default function Profile() {
     try {
       await setDoc(doc(db, "archives", report.id), { ...report, archivedAt: Date.now() });
       await deleteDoc(doc(db, "reports", report.id));
+
       setArchives([...archives, { ...report, archivedAt: Date.now() }]);
       setPosts(posts.filter((p) => p.id !== reportToDelete));
+
       setReportToDelete(null);
       setShowConfirmDeleteReport(false);
       triggerToast("Report deleted ✅");
     } catch (err) {
-      console.error("Delete Report Error:", err);
+      console.error(err);
       triggerToast("Failed to delete report ❌");
     }
   };
 
-  const clearAllArchives = async () => {
-    try {
-      for (const archive of archives) {
-        await deleteDoc(doc(db, "archives", archive.id));
-      }
-      setArchives([]);
-      setShowConfirmClear(false);
-      triggerToast("All archives cleared ✅");
-    } catch (err) {
-      console.error("Clear Archives Error:", err);
-      triggerToast("Failed to clear archives ❌");
-    }
-  };
-
-  const onDelete = async () => {
-    try {
-      // Re-authenticate user
-      if (profile.loginType === "email" && currentUser) {
-        if (!deletePwd) {
-          setDeleteError("Please enter your password!");
-          return;
-        }
-        const credential = EmailAuthProvider.credential(currentUser.email, deletePwd);
-        await reauthenticateWithCredential(currentUser, credential);
-      } else if (profile.loginType === "google" && currentUser) {
-        await reauthenticateWithPopup(currentUser, googleProvider);
-      }
-
-      // Move user data to archiveUsers
-      if (currentUserId !== "guest") {
-        await setDoc(doc(db, "archiveUsers", currentUserId), {
-          ...profile,
-          isActive: false,
-          archivedAt: Date.now(),
-        });
-        await deleteDoc(doc(db, "users", currentUserId));
-      }
-
-      // Delete all user's reports
-      for (const post of posts) {
-        await deleteDoc(doc(db, "reports", post.id));
-      }
-
-      // Delete all archives
-      for (const archive of archives) {
-        await deleteDoc(doc(db, "archives", archive.id));
-      }
-
-      // Delete Firebase Auth user if not guest
-      if (profile.loginType !== "guest" && currentUser) {
-        await currentUser.delete();
-      }
-
-      // Clear local storage
-      localStorage.removeItem(LS_PROFILE);
-      localStorage.removeItem("brgy_is_admin");
-
-      triggerToast("Account deleted successfully ✅");
-      await signOut(auth);
-      navigate("/login");
-    } catch (err) {
-      console.error("Delete Error:", err);
-      setDeleteError(
-        err.code === "auth/wrong-password"
-          ? "Incorrect password!"
-          : err.code === "auth/requires-recent-login"
-          ? "Please re-login and try again."
-          : "Failed to delete account. Please try again."
-      );
-    }
+  const clearAllArchives = () => {
+    archives.forEach(async (a) => await deleteDoc(doc(db, "archives", a.id)));
+    setArchives([]);
+    setShowConfirmClear(false);
+    triggerToast("All archives cleared ✅");
   };
 
   const formatTimestamp = (timestamp) => (timestamp ? new Date(timestamp).toLocaleString() : "—");
 
+  // Add this inside your Profile component, before return()
+const onDelete = async () => {
+  try {
+    // Delete all user's reports
+    for (const post of posts) {
+      await deleteDoc(doc(db, "reports", post.id));
+    }
+
+    // Delete all archives
+    for (const archive of archives) {
+      await deleteDoc(doc(db, "archives", archive.id));
+    }
+
+    // Delete user from Firebase Auth if email/login type
+    if (profile.loginType === "email" && currentUser) {
+      await currentUser.delete(); // deletes user account in Firebase Auth
+    }
+
+    // Remove local storage
+    localStorage.removeItem(LS_PROFILE);
+
+    triggerToast("Account deleted successfully ✅");
+
+    // Redirect to login
+    navigate("/login");
+  } catch (err) {
+    console.error(err);
+    setDeleteError("Failed to delete account. Re-login and try again.");
+  }
+};
+
   return (
     <div className="min-h-screen bg-[var(--color-secondary)] text-[var(--color-text)]">
       <div className="mx-auto w-full max-w-5xl px-4 sm:px-6 py-8 sm:py-10">
+        {/* Top actions */}
         <div className="mb-4 flex items-center justify-between">
           <Link
             to="/dashboard"
@@ -331,20 +274,24 @@ export default function Profile() {
           >
             <FiArrowLeft /> Back to Dashboard
           </Link>
+
           <div className="relative">
+            {/* View Archives button */}
+
             <button
               onClick={() => setDropdownOpen((d) => !d)}
               className="inline-flex items-center gap-2 rounded-xl px-3 py-2 font-semibold bg-[var(--color-primary)] text-white hover:bg-[var(--color-primary-hover)]"
             >
               <FiUser /> Profile <FiChevronDown />
             </button>
+
             {dropdownOpen && (
               <div className="absolute right-0 mt-2 w-56 rounded-lg bg-white ring-1 ring-black/10 shadow-md overflow-hidden z-20">
                 <button
                   onClick={() => {
                     setShowEdit(true);
                     setForm(profile);
-                    setConfirmPwd("");
+                    setConfirmPwd(profile.password || "");
                     setShowPwd(false);
                     setShowConfirmPwd(false);
                     setDropdownOpen(false);
@@ -357,8 +304,6 @@ export default function Profile() {
                   onClick={() => {
                     setShowDelete(true);
                     setDropdownOpen(false);
-                    setDeletePwd("");
-                    setDeleteError("");
                   }}
                   className="w-full text-left px-4 py-2 hover:bg-red-50 text-red-600 flex items-center gap-2"
                 >
@@ -369,6 +314,7 @@ export default function Profile() {
           </div>
         </div>
 
+        {/* PROFILE HEADER */}
         <section className="rounded-3xl overflow-hidden ring-1 ring-black/10 bg-gradient-to-br from-[var(--color-primary)] to-[var(--color-primary-hover)] text-white">
           <div className="px-6 sm:px-10 py-8 sm:py-10 text-center">
             <div className="mx-auto h-24 w-24 rounded-full grid place-items-center bg-white/15 ring-1 ring-white/30 overflow-hidden">
@@ -382,8 +328,11 @@ export default function Profile() {
                 <FiUser className="text-4xl" />
               )}
             </div>
-            <h1 className="mt-4 text-2xl sm:text-3xl font-extrabold">{displayName}</h1>
+            <h1 className="mt-4 text-2xl sm:text-3xl font-extrabold">
+              {displayName}
+            </h1>
             <p className="mt-1 text-white/85">Your Barangay Portal profile</p>
+            
             <div className="mt-6 grid grid-cols-1 sm:grid-cols-3 gap-3 max-w-2xl mx-auto">
               <StatPill label="Reports Submitted" value={myPosts.length} />
               <StatPill label="Last Submitted" value={formatTimestamp(lastSubmitted)} />
@@ -392,10 +341,12 @@ export default function Profile() {
           </div>
         </section>
 
+        {/* REPORT HISTORY */}
         <section className="mt-6 rounded-3xl bg-white ring-1 ring-black/10 overflow-hidden">
           <div className="px-6 py-4 border-b border-black/10 text-center font-semibold text-[var(--color-primary)]">
             Report History
           </div>
+
           {myPosts.length === 0 ? (
             <EmptyState />
           ) : (
@@ -415,7 +366,9 @@ export default function Profile() {
                         </h3>
                         <div className="mt-1 text-xs text-black/60 inline-flex items-center gap-1">
                           <FiClock className="opacity-70" />
-                          {formatTimestamp(p.createdAt)}
+                          {p?.createdAt
+                            ? new Date(p.createdAt).toLocaleString()
+                            : "—"}
                         </div>
                         {p.location && (
                           <div className="mt-1 text-sm text-black/70 inline-flex items-center gap-1">
@@ -424,7 +377,9 @@ export default function Profile() {
                           </div>
                         )}
                         {p.desc && (
-                          <p className="mt-3 text-sm mx-auto max-w-xl">{p.desc}</p>
+                          <p className="mt-3 text-sm mx-auto max-w-xl">
+                            {p.desc}
+                          </p>
                         )}
                         {p.imageUrl && (
                           <div className="mt-3 w-full">
@@ -437,6 +392,7 @@ export default function Profile() {
                           </div>
                         )}
                         <div className="mt-auto flex gap-3 pt-4">
+                          {/* ONLY Delete button (Archive button removed as requested) */}
                           <button
                             onClick={() => deleteReport(p.id)}
                             className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-100 text-red-600 hover:bg-red-200 text-sm"
@@ -453,6 +409,7 @@ export default function Profile() {
         </section>
       </div>
 
+      {/* Confirm Clear All Archives Modal */}
       <AnimatePresence>
         {showConfirmClear && (
           <motion.div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
@@ -483,6 +440,7 @@ export default function Profile() {
         )}
       </AnimatePresence>
 
+      {/* EDIT PROFILE MODAL (unchanged layout; has eye toggles) */}
       <AnimatePresence>
         {showEdit && (
           <motion.div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50">
@@ -497,6 +455,7 @@ export default function Profile() {
                 Edit Profile
               </h2>
               <form className="space-y-4" onSubmit={onSubmit}>
+                {/* Upload Image */}
                 <div>
                   <label className="text-sm font-medium mb-1 inline-flex items-center gap-2">
                     <FiImage className="opacity-80" /> Profile Photo
@@ -515,76 +474,87 @@ export default function Profile() {
                     />
                   )}
                 </div>
+
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium">First Name</label>
+                    <label className="block text-sm font-medium">
+                      First Name
+                    </label>
                     <input
                       type="text"
                       name="firstName"
-                      value={form.firstName || ""}
+                      value={form.firstName}
                       onChange={onChange}
                       className="w-full rounded-xl bg-[var(--color-secondary)] px-4 py-3 outline-none ring-1 ring-black/10 focus:ring-2 focus:ring-[var(--color-primary)]"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium">Middle Name</label>
+                    <label className="block text-sm font-medium">
+                      Middle Name
+                    </label>
                     <input
                       type="text"
                       name="middleName"
-                      value={form.middleName || ""}
+                      value={form.middleName}
                       onChange={onChange}
                       className="w-full rounded-xl bg-[var(--color-secondary)] px-4 py-3 outline-none ring-1 ring-black/10 focus:ring-2 focus:ring-[var(--color-primary)]"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium">Last Name</label>
+                    <label className="block text-sm font-medium">
+                      Last Name
+                    </label>
                     <input
                       type="text"
                       name="lastName"
-                      value={form.lastName || ""}
+                      value={form.lastName}
                       onChange={onChange}
                       className="w-full rounded-xl bg-[var(--color-secondary)] px-4 py-3 outline-none ring-1 ring-black/10 focus:ring-2 focus:ring-[var(--color-primary)]"
                     />
                   </div>
                 </div>
-                {profile.loginType === "email" && (
-                  <>
-                    <div className="relative">
-                      <label className="block text-sm font-medium">Password</label>
-                      <input
-                        type={showPwd ? "text" : "password"}
-                        name="password"
-                        value={form.password || ""}
-                        onChange={onChange}
-                        className="w-full rounded-xl bg-[var(--color-secondary)] px-4 py-3 pr-12 outline-none ring-1 ring-black/10 focus:ring-2 focus:ring-[var(--color-primary)]"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowPwd((v) => !v)}
-                        className="absolute right-3 top-8 p-1 text-black/60 hover:text-black"
-                      >
-                        {showPwd ? <FiEyeOff /> : <FiEye />}
-                      </button>
-                    </div>
-                    <div className="relative">
-                      <label className="block text-sm font-medium">Confirm Password</label>
-                      <input
-                        type={showConfirmPwd ? "text" : "password"}
-                        value={confirmPwd}
-                        onChange={(e) => setConfirmPwd(e.target.value)}
-                        className="w-full rounded-xl bg-[var(--color-secondary)] px-4 py-3 pr-12 outline-none ring-1 ring-black/10 focus:ring-2 focus:ring-[var(--color-primary)]"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowConfirmPwd((v) => !v)}
-                        className="absolute right-3 top-8 p-1 text-black/60 hover:text-black"
-                      >
-                        {showConfirmPwd ? <FiEyeOff /> : <FiEye />}
-                      </button>
-                    </div>
-                  </>
-                )}
+
+                {/* Password */}
+                <div className="relative">
+                  <label className="block text-sm font-medium">Password</label>
+                  <input
+                    type={showPwd ? "text" : "password"}
+                    name="password"
+                    value={form.password}
+                    onChange={onChange}
+                    className="w-full rounded-xl bg-[var(--color-secondary)] px-4 py-3 pr-12 outline-none ring-1 ring-black/10 focus:ring-2 focus:ring-[var(--color-primary)]"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPwd((v) => !v)}
+                    className="absolute right-3 top-8 p-1 text-black/60 hover:text-black"
+                  >
+                    {showPwd ? <FiEyeOff /> : <FiEye />}
+                  </button>
+                </div>
+
+                {/* Confirm Password */}
+                <div className="relative">
+                  <label className="block text-sm font-medium">
+                    Confirm Password
+                  </label>
+                  <input
+                    type={showConfirmPwd ? "text" : "password"}
+                    value={confirmPwd}
+                    onChange={(e) => setConfirmPwd(e.target.value)}
+                    className="w-full rounded-xl bg-[var(--color-secondary)] px-4 py-3 pr-12 outline-none ring-1 ring-black/10 focus:ring-2 focus:ring-[var(--color-primary)]"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPwd((v) => !v)}
+                    className="absolute right-3 top-8 p-1 text-black/60 hover:text-black"
+                  >
+                    {showConfirmPwd ? <FiEyeOff /> : <FiEye />}
+                  </button>
+                </div>
+
                 {error && <p className="text-sm text-red-600">{error}</p>}
+
                 <button
                   type="submit"
                   className="w-full rounded-xl px-4 py-3 font-semibold bg-[var(--color-primary)] text-white hover:bg-[var(--color-primary-hover)]"
@@ -597,40 +567,15 @@ export default function Profile() {
         )}
       </AnimatePresence>
 
-      <AnimatePresence>
-        {showConfirmDeleteReport && (
-          <motion.div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-            <motion.div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 text-center">
-              <FiTrash2 className="mx-auto text-4xl text-red-500 mb-3" />
-              <h2 className="text-xl font-bold mb-2 text-red-600">Delete Report?</h2>
-              <p className="text-sm text-black/70 mb-4">
-                This will move the report to archives.
-              </p>
-              <div className="flex gap-3 justify-center">
-                <button
-                  onClick={() => setShowConfirmDeleteReport(false)}
-                  className="px-4 py-2 lasers rounded-xl bg-gray-200 hover:bg-gray-300"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={confirmDeleteReport}
-                  className="px-4 py-2 rounded-xl bg-red-600 text-white hover:bg-red-700"
-                >
-                  Yes, Delete
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
+      {/* DELETE ACCOUNT CONFIRM MODAL */}
       <AnimatePresence>
         {showDelete && (
           <motion.div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
             <motion.div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 text-center">
               <FiTrash2 className="mx-auto text-4xl text-red-500 mb-3" />
-              <h2 className="text-xl font-bold mb-2 text-red-600">Delete Account?</h2>
+              <h2 className="text-xl font-bold mb-2 text-red-600">
+                Delete Account?
+              </h2>
               <p className="text-sm text-black/70 mb-4">
                 This will permanently delete your profile and all reports.
               </p>
@@ -658,39 +603,36 @@ export default function Profile() {
         )}
       </AnimatePresence>
 
+      {/* PASSWORD CONFIRM MODAL */}
       <AnimatePresence>
         {showConfirmDelete && (
           <motion.div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
             <motion.div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 text-center">
               <h2 className="text-lg font-bold mb-3 text-[var(--color-primary)]">
-                Confirm Account Deletion
+                Confirm Password
               </h2>
               <p className="text-sm text-black/70 mb-4">
-                {profile.loginType === "google"
-                  ? "Please re-authenticate with Google to confirm deletion."
-                  : profile.loginType === "email"
-                  ? "Please enter your password to confirm deletion."
-                  : "Confirm to delete your guest account."}
+                Please enter your password to confirm deletion.
               </p>
-              {profile.loginType === "email" && (
-                <div className="relative mb-3">
-                  <input
-                    type={showDeletePwd ? "text" : "password"}
-                    value={deletePwd}
-                    onChange={(e) => setDeletePwd(e.target.value)}
-                    className="w-full rounded-xl bg-[var(--color-secondary)] px-4 py-3 pr-12 outline-none ring-1 ring-black/10 focus:ring-2 focus:ring-[var(--color-primary)]"
-                    placeholder="Enter your password"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowDeletePwd((v) => !v)}
-                    className="absolute right-3 top-3 text-black/60 hover:text-black"
-                  >
-                    {showDeletePwd ? <FiEyeOff /> : <FiEye />}
-                  </button>
-                </div>
+              <div className="relative mb-3">
+                <input
+                  type={showDeletePwd ? "text" : "password"}
+                  value={deletePwd}
+                  onChange={(e) => setDeletePwd(e.target.value)}
+                  className="w-full rounded-xl bg-[var(--color-secondary)] px-4 py-3 pr-12 outline-none ring-1 ring-black/10 focus:ring-2 focus:ring-[var(--color-primary)]"
+                  placeholder="Enter your password"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowDeletePwd((v) => !v)}
+                  className="absolute right-3 top-3 text-black/60 hover:text-black"
+                >
+                  {showDeletePwd ? <FiEyeOff /> : <FiEye />}
+                </button>
+              </div>
+              {deleteError && (
+                <p className="text-sm text-red-600 mb-3">{deleteError}</p>
               )}
-              {deleteError && <p class ExpansionOptions="text-sm text-red-600 mb-3">{deleteError}</p>}
               <div className="flex gap-3 justify-center">
                 <button
                   onClick={() => setShowConfirmDelete(false)}
@@ -699,10 +641,16 @@ export default function Profile() {
                   Cancel
                 </button>
                 <button
-                  onClick={onDelete}
+                  onClick={() => {
+                    if (deletePwd === profile.password) {
+                      onDelete();
+                    } else {
+                      setDeleteError("Incorrect password!");
+                    }
+                  }}
                   className="px-4 py-2 rounded-xl bg-red-600 text-white hover:bg-red-700"
                 >
-                  {profile.loginType === "google" ? "Re-authenticate with Google" : "Confirm Delete"}
+                  Confirm Delete
                 </button>
               </div>
             </motion.div>
@@ -710,10 +658,11 @@ export default function Profile() {
         )}
       </AnimatePresence>
 
+      {/* TOAST */}
       <AnimatePresence>
         {toast && (
           <motion.div
-            initial={{ y:50, opacity: 0 }}
+            initial={{ y: 50, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: 50, opacity: 0 }}
             className="fixed bottom-6 right-6 z-[1000] bg-[var(--color-primary)] text-white px-4 py-3 rounded-xl shadow-lg"
@@ -726,6 +675,7 @@ export default function Profile() {
   );
 }
 
+// ===== Components =====
 function StatPill({ label, value }) {
   return (
     <div className="rounded-xl px-4 py-3 bg-white/10 ring-1 ring-white/20 text-white text-center">
