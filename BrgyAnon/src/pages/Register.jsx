@@ -21,7 +21,8 @@ export default function Register({ setProfile }) { // <-- receive setProfile fro
   const [touched, setTouched] = useState({});
   const [showPwd, setShowPwd] = useState(false);
   const [showConfirmPwd, setShowConfirmPwd] = useState(false);
-
+  const [notification, setNotification] = useState("");
+  const [notificationType, setNotificationType] = useState("success"); // "success" or "danger"
   const setField = (e) => {
     const { name, value, type, checked } = e.target;
     setForm((f) => ({ ...f, [name]: type === "checkbox" ? checked : value }));
@@ -110,7 +111,8 @@ export default function Register({ setProfile }) { // <-- receive setProfile fro
     // 6️⃣ Update app state (so displayName works immediately)
     if (setProfile) setProfile(updatedProfile);
 
-    alert("Account created successfully!");
+    setNotification("Account created successfully!");
+    setNotificationType("success");
 
     // 7️⃣ Redirect to homepage or dashboard instead of login page
     navigate("/login");  // or "/home" depende sa app mo
@@ -141,7 +143,7 @@ export default function Register({ setProfile }) { // <-- receive setProfile fro
         {/* Form */}
         <form onSubmit={onSubmit} className="p-4">
           <div className="row g-3">
-            <div className="col-sm-4">
+            <div className="form-control rounded-pill">
               <Field label="First name *" error={touched.firstName && !form.firstName.trim()}>
                 <Input
                   icon={<FiUser />}
@@ -154,7 +156,7 @@ export default function Register({ setProfile }) { // <-- receive setProfile fro
                 />
               </Field>
             </div>
-            <div className="col-sm-4">
+            <div className="form-control rounded-pill">
               <Field label="Middle name">
                 <Input
                   icon={<FiUser />}
