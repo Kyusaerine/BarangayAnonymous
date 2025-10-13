@@ -535,9 +535,9 @@ return (
                 onClick={onView}
                 className="px-3 py-2 rounded-xl text-sm bg-violet-200 text-violet-800 hover:bg-violet-300"
               >
-                <FiEye/> View Details
+                <FiEye className="inline mr-1" /> View Details
               </button>
-
+              
             </>
           ) : inProgress ? (
             <>
