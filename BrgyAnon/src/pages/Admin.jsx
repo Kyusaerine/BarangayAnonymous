@@ -309,7 +309,7 @@ export default function Admin() {
 
           {/* Report list */}
           {filtered.length === 0 ? (
-            <div className="rounded-2xl bg-white/5 ring-1 ring-white/10 p-10 text-center text-white/70">
+            <div className="rounded-2xl bg-black/5 ring-1 ring-white/10 p-10 text-center text-white/70">
               No matching reports.
             </div>
           ) : (
