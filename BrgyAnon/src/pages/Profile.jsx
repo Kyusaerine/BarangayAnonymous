@@ -235,19 +235,19 @@ export default function Profile() {
   // Add this inside your Profile component, before return()
 const onDelete = async () => {
   try {
-    // Delete user's reports
+    // Delete all user's reports
     for (const post of posts) {
       await deleteDoc(doc(db, "reports", post.id));
     }
 
-    // Delete user's archives
+    // Delete all archives
     for (const archive of archives) {
       await deleteDoc(doc(db, "archives", archive.id));
     }
 
-    // Delete from Firebase Auth
+    // Delete user from Firebase Auth if email/login type
     if (profile.loginType === "email" && currentUser) {
-      await currentUser.delete();
+      await currentUser.delete(); // deletes user account in Firebase Auth
     }
 
     // Remove local storage
@@ -255,15 +255,8 @@ const onDelete = async () => {
 
     triggerToast("Account deleted successfully ✅");
 
-    // ✅ LOGIN ADMIN HERE
-    const adminEmail = "admin@example.com"; 
-    const adminPassword = "adminpassword"; 
-
-    await signInWithEmailAndPassword(auth, adminEmail, adminPassword);
-
-    // ✅ Redirect to admin dashboard
-    navigate("/login"); // Or wherever the admin should land
-
+    // Redirect to login
+    navigate("/login");
   } catch (err) {
     console.error(err);
     setDeleteError("Failed to delete account. Re-login and try again.");
@@ -563,12 +556,12 @@ const onDelete = async () => {
                 {error && <p className="text-sm text-red-600">{error}</p>}
 
                 <button
-                  type="button" // use "button" to avoid accidental form submission
-                  onClick={() => navigate("/login")}
-                  className="w-full rounded-xl px-4 py-3 font-semibold bg-[var(--color-primary)] text-white hover:bg-[var(--color-primary-hover)]"
-                >
-                  Save Changes
-                </button>
+                type="button" // use "button" to avoid accidental form submission
+                onClick={() => navigate("/login")}
+                className="w-full rounded-xl px-4 py-3 font-semibold bg-[var(--color-primary)] text-white hover:bg-[var(--color-primary-hover)]"
+              >
+                Save Changes
+              </button>
 
               </form>
             </motion.div>
