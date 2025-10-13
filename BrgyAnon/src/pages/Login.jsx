@@ -45,7 +45,7 @@ export default function Login() {
     setNotification("");
 
     if (!email.trim() || !password.trim()) {
-      setNotification("Please enter email and password.");
+      setNotification("Please enter email/codename and password.");
       setNotificationType("warning");
       return;
     }
@@ -100,7 +100,7 @@ export default function Login() {
     } else {
       // ---------------------- LOGIN ----------------------
       if (!email.trim() || !password.trim()) {
-        setNotification("Please enter email and password.");
+        setNotification("Please enter email/codename and password.");
         setNotificationType("warning");
         return;
       }
@@ -138,26 +138,27 @@ export default function Login() {
         }
 
         // ---------------------- REGULAR USER LOGIN ----------------------
-        // Check archived users
+        // Sign in with Firebase Auth first
+        const cred = await signInWithEmailAndPassword(auth, email.trim(), password);
+        const user = cred.user;
+
+        // Now check archived users using the authenticated user's email
         const archivedQuery = query(
           collection(db, "archiveUsers"),
-          where("email", "==", email.trim())
+          where("email", "==", user.email)
         );
         const archivedSnap = await getDocs(archivedQuery);
         if (!archivedSnap.empty) {
+          await signOut(auth);
           setNotification("⚠️ Your account has been deactivated. Please contact the admin.");
           setNotificationType("danger");
           return;
         }
 
-        // Sign in with Firebase Auth
-        const cred = await signInWithEmailAndPassword(auth, email, password);
-        const user = cred.user;
-
         const userRef = doc(db, "users", user.uid);
         const userSnap = await getDoc(userRef);
 
-        if (userSnap.exists() && userSnap.data().isActive === false) {
+        if (!userSnap.exists() || userSnap.data().isActive === false) {
           await signOut(auth);
           setNotification("⚠️ Your account has been deactivated. Please contact the admin.");
           setNotificationType("danger");
@@ -189,7 +190,11 @@ export default function Login() {
         navigate("/home");
       } catch (err) {
         console.error("Login Error:", err);
-        setNotification("Login failed: " + err.message);
+        if (err.code === 'auth/invalid-credential') {
+          setNotification("Invalid email or password. Please try again.");
+        } else {
+          setNotification("Login failed: " + err.message);
+        }
         setNotificationType("danger");
       }
     }
@@ -340,7 +345,7 @@ export default function Login() {
 
       <form onSubmit={handleSubmit}>
         <div className="mb-3">
-          <label>{isSignup ? "Email" : "Email"}</label>
+          <label>{isSignup ? "Email" : "Email or Admin Codename"}</label>
           <input
             type="email"
             className="form-control rounded-pill"
