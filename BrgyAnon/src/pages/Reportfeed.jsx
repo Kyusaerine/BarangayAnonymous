@@ -748,7 +748,7 @@ function EditReportModal({ post, onClose, onSaved }) {
           )}
 
           <div className="grid sm:grid-cols-2 gap-4">
-            <TextField label="Your Name" placeholder="e.g., Juan Dela Cruz" value={form.userName} onChange={(v) => setForm((s) => ({ ...s, userName: v }))} />
+            <TextField label="Your Name" placeholder="e.g., Juan Dela Cruz" value={form.profileName} onChange={(v) => setForm((s) => ({ ...s, userName: v }))} />
             <SelectField label="Issue *" required value={form.issue} onChange={(v) => setForm((s) => ({ ...s, issue: v }))} options={["Road Damage","Waste Management","Street Lighting","Water/Sanitation","Noise/Disturbance","Safety","Others"]} />
           </div>
 
