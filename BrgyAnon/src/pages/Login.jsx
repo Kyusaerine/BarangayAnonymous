@@ -123,6 +123,7 @@ export default function Login() {
                 { merge: true }
               );
               localStorage.setItem("brgy_is_admin", "true");
+              localStorage.removeItem("brgy_profile_data"); // Clear any user profile
               navigate("/admin");
               return; // ✅ stop execution here
             } else {
@@ -222,7 +223,7 @@ export default function Login() {
       const userRef = doc(db, "users", user.uid);
       const userSnap = await getDoc(userRef);
 
-      if (userSnap.exists() && userSnap.data().isActive === false) {
+      if (!userSnap.exists() || userSnap.data().isActive === false) {
         await signOut(auth);
         setNotification("⚠️ Your account has been deactivated. Please contact the admin.");
         setNotificationType("danger");
@@ -345,7 +346,7 @@ export default function Login() {
 
       <form onSubmit={handleSubmit}>
         <div className="mb-3">
-          <label>{isSignup ? "Email" : "Email"}</label>
+          <label>{isSignup ? "Email" : "Email or Admin Codename"}</label>
           <input
             type="email"
             className="form-control rounded-pill"
