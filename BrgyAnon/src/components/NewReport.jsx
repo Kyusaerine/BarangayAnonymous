@@ -433,7 +433,7 @@ export default function NewReport() {
             <div className="space-y-1">
               <label className="text-sm font-medium">Your Name</label>
               <div className="w-full rounded-xl bg-[var(--color-secondary)] px-4 py-3">
-                {form.fullName}
+                {form.userName}
               </div>
             </div>
 
