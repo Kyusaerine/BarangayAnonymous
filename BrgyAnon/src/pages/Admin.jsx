@@ -30,20 +30,16 @@ export const STATUSES = [
 const handleRestoreUser = async (user) => {
   try {
     // Restore the user in main 'users' collection
-    await setDoc(
-      doc(db, "users", user.userId), // Make sure this matches the user ID field in archive
-      {
-        email: user.email || "",
-        name: user.name || "",
-        userId: user.userId,
-        isActive: true,
-        restoredAt: new Date(),
-      },
-      { merge: true }
-    );
+    await setDoc(doc(db, "users", user.userId), {
+  email: user.email || "",
+  name: user.name || "",
+  userId: user.userId,
+  isActive: true,
+  restoredAt: new Date(),
+}, { merge: true });
 
-    // Remove user from archive
-    await deleteDoc(doc(db, "archive", user.userId)); // Use the same doc ID as in archive
+await deleteDoc(doc(db, "archive", user.userId));
+
 
     alert("✅ User restored successfully!");
   } catch (err) {
