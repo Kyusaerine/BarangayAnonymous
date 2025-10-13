@@ -7,6 +7,7 @@ import {
   doc,
   serverTimestamp,
   onSnapshot,
+  updateDoc,
 } from "firebase/firestore";
 import { db } from "../firebase";
 import {
@@ -16,7 +17,8 @@ import {
   FiMenu,
   FiArrowLeftCircle,
 } from "react-icons/fi";
-import { useNavigate } from "react-router-dom";
+
+
 
 const Archive = () => {
   const [activeTab, setActiveTab] = useState("active");
@@ -114,36 +116,27 @@ const Archive = () => {
 
   // 🔹 Restore user (move back to users)
   const handleRestoreUser = async (user) => {
-    if (user.isProcessing) return;
-    user.isProcessing = true;
-    try {
-      const userRef = doc(db, "users", user.id);
-      const archiveRef = doc(db, "archiveUsers", user.id);
+  try {
+    // Remove from archive
+    await deleteDoc(doc(db, "archive", userId));
 
-      // Restore user
-      await setDoc(userRef, {
-        ...user,
-        restoredAt: serverTimestamp(),
-        isActive: true,
-        archived: false,
-      });
+    // Optional: update main users collection
+    await updateDoc(doc(db, "users", userId), {
+      deactivatedByAdmin: false,
+    });
 
-      // Remove from archiveUsers
-      await deleteDoc(archiveRef);
+    // Optional: add to activeUsers list
+    await setDoc(doc(db, "activeUsers", userId), {
+      userId,
+      restoredAt: new Date(),
+    });
 
-      setArchiveUsers((prev) => prev.filter((u) => u.id !== user.id));
-      setUsers((prev) => [
-        ...prev,
-        { ...user, restoredAt: new Date(), isActive: true },
-      ]);
+    console.log("✅ User restored successfully.");
+  } catch (err) {
+    console.error("❌ Failed to restore user:", err.message);
+  }
+};
 
-      showNotification("User restored successfully!");
-    } catch (error) {
-      console.error("Error restoring user:", error);
-    } finally {
-      user.isProcessing = false;
-    }
-  };
 
   // 🔹 Restore report
   const handleRestoreReport = async (report) => {
