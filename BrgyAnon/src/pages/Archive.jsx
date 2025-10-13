@@ -21,7 +21,7 @@ import { useNavigate } from "react-router-dom";
 const Archive = () => {
   const [activeTab, setActiveTab] = useState("active");
   const [users, setUsers] = useState([]);
-  const [archivedUsers, setArchivedUsers] = useState([]);
+  const [archiveUsers, setArchiveUsers] = useState([]);
   const [archivedReports, setArchivedReports] = useState([]);
   const [notif, setNotif] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -47,7 +47,7 @@ const Archive = () => {
       setUsers(filtered);
     });
 
-    const unsubArchivedUsers = onSnapshot(collection(db, "archiveUsers"), (snapshot) => {
+    const unsubArchiveUsers = onSnapshot(collection(db, "archiveUsers"), (snapshot) => {
       const data = snapshot.docs.map((d) => ({ id: d.id, ...d.data(), isProcessing: false }));
       const filtered = data.filter(
         (u) =>
@@ -57,7 +57,7 @@ const Archive = () => {
             u.displayName?.toLowerCase().includes("guest")
           )
       );
-      setArchivedUsers(filtered);
+      setArchiveUsers(filtered);
     });
 
     const unsubArchivedReports = onSnapshot(collection(db, "archivedReports"), (snapshot) => {
@@ -76,7 +76,7 @@ const Archive = () => {
 
     return () => {
       unsubUsers();
-      unsubArchivedUsers();
+      unsubArchiveUsers();
       unsubArchivedReports();
     };
   }, []);
@@ -101,7 +101,7 @@ const Archive = () => {
 
       // UI updates instantly
       setUsers((prev) => prev.filter((u) => u.id !== user.id));
-      setArchivedUsers((prev) => [
+      setArchiveUsers((prev) => [
         ...prev,
         { ...user, archivedAt: new Date(), isActive: false },
       ]);
@@ -131,7 +131,7 @@ const Archive = () => {
       // Remove from archiveUsers
       await deleteDoc(archiveRef);
 
-      setArchivedUsers((prev) => prev.filter((u) => u.id !== user.id));
+      setArchiveUsers((prev) => prev.filter((u) => u.id !== user.id));
       setUsers((prev) => [
         ...prev,
         { ...user, restoredAt: new Date(), isActive: true },
@@ -340,14 +340,14 @@ const Archive = () => {
                         </tr>
                       </thead>
                       <tbody>
-                        {archivedUsers.length === 0 ? (
+                        {archiveUsers.length === 0 ? (
                           <tr>
                             <td colSpan="5" className="text-center text-muted py-4">
                               No archived users.
                             </td>
                           </tr>
                         ) : (
-                          archivedUsers.map((user) => (
+                          archiveUsers.map((user) => (
                             <tr key={user.id}>
                               <td>{user.id}</td>
                               <td>
