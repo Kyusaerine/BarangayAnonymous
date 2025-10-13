@@ -58,65 +58,69 @@ export default function Register({ setProfile }) { // <-- receive setProfile fro
   const canSubmit = Boolean(requiredOk);
 
   const onSubmit = async (e) => {
-    e.preventDefault();
-    setTouched({
-      firstName: true,
-      lastName: true,
-      email: true,
-      password: true,
-      confirmPassword: true,
-      agree: true,
+  e.preventDefault();
+  setTouched({
+    firstName: true,
+    lastName: true,
+    email: true,
+    password: true,
+    confirmPassword: true,
+    agree: true,
+  });
+  if (!canSubmit) return;
+
+  try {
+    // 1️⃣ Create user in Firebase Auth
+    const userCredential = await createUserWithEmailAndPassword(
+      auth,
+      form.email,
+      form.password
+    );
+    const user = userCredential.user;
+
+    // 2️⃣ Construct full name
+    const fullName = `${form.firstName} ${form.middleName} ${form.lastName}`.trim();
+
+    // 3️⃣ Update Firebase Auth displayName
+    await updateProfile(user, { displayName: fullName });
+
+    // 4️⃣ Save to Firestore
+    await setDoc(doc(db, "users", user.uid), {
+      firstName: form.firstName,
+      middleName: form.middleName,
+      lastName: form.lastName,
+      email: form.email,
+      fullName,
+      loginType: "created",
+      createdAt: serverTimestamp(),
     });
-    if (!canSubmit) return;
 
-    try {
-      // 1️⃣ Create user in Firebase Auth
-      const userCredential = await createUserWithEmailAndPassword(
-        auth,
-        form.email,
-        form.password
-      );
-      const user = userCredential.user;
+    // 5️⃣ Save profile in localStorage
+    const updatedProfile = {
+      firstName: form.firstName,
+      middleName: form.middleName,
+      lastName: form.lastName,
+      email: form.email,
+      fullName,
+      loginType: "created",
+      lastLogin: new Date().toLocaleString(),
+    };
+    localStorage.setItem("LS_PROFILE", JSON.stringify(updatedProfile));
 
-      // 2️⃣ Construct full name
-      const fullName = `${form.firstName} ${form.middleName} ${form.lastName}`.trim();
+    // 6️⃣ Update app state (so displayName works immediately)
+    if (setProfile) setProfile(updatedProfile);
 
-      // 3️⃣ Update Firebase Auth displayName
-      await updateProfile(user, { displayName: fullName });
+    alert("Account created successfully!");
 
-      // 4️⃣ Save to Firestore
-      await setDoc(doc(db, "users", user.uid), {
-        firstName: form.firstName,
-        middleName: form.middleName,
-        lastName: form.lastName,
-        email: form.email,
-        fullName,
-        loginType: "created",
-        createdAt: serverTimestamp(),
-      });
+    // 7️⃣ Redirect to homepage or dashboard instead of login page
+    navigate("/login");  // or "/home" depende sa app mo
 
-      // 5️⃣ Save profile in localStorage
-      const updatedProfile = {
-        firstName: form.firstName,
-        middleName: form.middleName,
-        lastName: form.lastName,
-        email: form.email,
-        fullName,
-        loginType: "created",
-        lastLogin: new Date().toLocaleString(),
-      };
-      localStorage.setItem("LS_PROFILE", JSON.stringify(updatedProfile));
+  } catch (error) {
+    console.error("Registration error:", error);
+    alert(error.message);
+  }
+};
 
-      // 6️⃣ Update app state (so displayName works immediately)
-      if (setProfile) setProfile(updatedProfile);
-
-      alert("Account created successfully!");
-      navigate("/login");
-    } catch (error) {
-      console.error("Registration error:", error);
-      alert(error.message);
-    }
-  };
 
   return (
     <div className="min-vh-100 d-flex align-items-center justify-content-center bg-light text-dark px-3 py-5">
