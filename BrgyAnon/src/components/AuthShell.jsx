@@ -111,12 +111,13 @@ export default function AuthShell() {
         })
       );
 
-      localStorage.removeItem("brgy_is_admin");
-      navigate("/home");
+    localStorage.removeItem("brgy_is_admin");
+    navigate("/home");
     } catch (err) {
-      console.error("Login failed:", err.message);
-      setNotification("Login failed: " + err.message);
+      console.error("This account has been deactivated by the admin.");
+      setNotification("Login failed: Your account has been deactivated by the admin.");
     }
+
   };
 
   // 🔹 Sign Up
