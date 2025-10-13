@@ -533,9 +533,9 @@ return (
 
               <button
                 onClick={onView}
-                className="px-3 py-2 rounded-xl text-sm bg-violet-200 text-violet-800 hover:bg-violet-300"
+                className="inline-flex items-center gap-2 rounded-xl px-3 py-2 font-semibold bg-violet-600 text-white hover:bg-violet-700"
               >
-                <FiEye className="inline mr-1" /> View Details
+                <FiEye /> View Details
               </button>
               
             </>
