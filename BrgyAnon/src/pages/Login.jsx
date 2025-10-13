@@ -127,7 +127,7 @@ export default function Login() {
       }
     } catch (err) {
       console.error("This account has been deactivated by the admin.");
-      setNotification("Your account has been deactivated by the admin.");
+      setNotification("Login failed: " + err.message);
       setNotificationType("danger");
     }
   };
