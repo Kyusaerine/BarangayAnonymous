@@ -8,6 +8,9 @@ import {
   signInWithPopup,
   signInWithEmailAndPassword,
   sendPasswordResetEmail,
+  fetchSignInMethodsForEmail,
+  EmailAuthProvider,
+  linkWithCredential,
   createUserWithEmailAndPassword,
 } from "firebase/auth";
 import {
@@ -16,6 +19,7 @@ import {
   addDoc,
   collection,
   getDoc,
+  deleteDoc,
 } from "firebase/firestore";
 import { FiEye, FiEyeOff } from "react-icons/fi";
 
@@ -57,15 +61,6 @@ export default function AuthShell() {
             { lastLogin: serverTimestamp() },
             { merge: true }
           );
-          localStorage.setItem(
-            "brgy_profile_data",
-            JSON.stringify({
-              loginType: "admin",
-              email: adminData.email,
-              userId: "admin",
-              lastLogin: new Date().toLocaleString(),
-            })
-          );
           localStorage.setItem("brgy_is_admin", "true");
           navigate("/admin");
           return;
@@ -83,7 +78,7 @@ export default function AuthShell() {
       // 🚫 BLOCK DEACTIVATED USERS
       const archivedSnap = await getDoc(doc(db, "archive", user.uid));
       if (archivedSnap.exists()) {
-        setNotification("Your account has been deactivated or deleted. Please contact admin.");
+        alert("Your account has been deactivated or deleted. Please contact admin.");
         await auth.signOut();
         return;
       }
@@ -256,9 +251,9 @@ export default function AuthShell() {
   };
 
   return (
-    <div className="min-h-screen grid place-items-center bg-[var(--color-secondary)] text-[var(--color-text)] px-3 sm:px-6">
-      <div className="relative w-full max-w-6xl rounded-3xl bg-white shadow-2xl overflow-hidden 
-                    grid grid-cols-1 md:grid-cols-2">
+   <div className="min-h-screen grid place-items-center bg-[var(--color-secondary)] text-[var(--color-text)] px-3 sm:px-6">
+    <div className="relative w-full max-w-6xl rounded-3xl bg-white shadow-2xl overflow-hidden 
+                  grid grid-cols-1 md:grid-cols-2">
         
         {/* LEFT COLUMN */}
         <div className="relative md:h-full">
@@ -460,6 +455,7 @@ function LoginForm({ email, setEmail, password, setPassword, onLogin, onGoogleSi
   );
 }
 
+
 /* ---------- GuestForm ---------- */
 function GuestForm({ fullName, setFullName, purpose, setPurpose, onGuestLogin, onGoogleSignIn }) {
   const navigate = useNavigate();
@@ -509,6 +505,7 @@ function Divider() {
     </div>
   );
 }
+
 
 function SwapButton({ onClick, children }) {
   return (
@@ -613,6 +610,7 @@ function ForgotPasswordModal({ open, onClose, onSubmit }) {
     </AnimatePresence>
   );
 }
+
 
 /* ---------- SVGs ---------- */
 

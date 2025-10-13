@@ -27,20 +27,13 @@ import {
   setDoc,
   deleteDoc,
 } from "firebase/firestore";
-import {
-  EmailAuthProvider,
-  reauthenticateWithCredential,
-  reauthenticateWithPopup,
-  googleProvider,
-  deleteUser,
-} from "firebase/auth";
 
 const LS_PROFILE = "brgy_profile_data";
 
 export default function Profile() {
   const navigate = useNavigate();
   const currentUser = auth.currentUser;
-  const currentUserId = currentUser?.uid || JSON.parse(localStorage.getItem(LS_PROFILE) || "{}")?.userId || "guest";
+  const currentUserId = currentUser?.uid || "guest";
 
   const [profile, setProfile] = useState(() => {
     try {
@@ -74,38 +67,33 @@ export default function Profile() {
   // Load profile on auth change
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged((user) => {
-      const savedProfile = JSON.parse(localStorage.getItem(LS_PROFILE) || "{}");
       if (user) {
-        const updatedProfile = {
-          ...savedProfile,
-          userId: user.uid,
-          email: user.email || savedProfile.email || "",
-          fullName: savedProfile.fullName || user.displayName || "",
-          googleName: savedProfile.googleName || user.displayName || "",
-          profileImage: savedProfile.profileImage || user.photoURL || "",
-        };
+        const savedProfile = JSON.parse(localStorage.getItem(LS_PROFILE) || "{}");
+        const updatedProfile =
+          savedProfile.userId === user.uid
+            ? savedProfile
+            : {
+                ...savedProfile,
+                userId: user.uid,
+                email: user.email || savedProfile.email || "",
+              };
         localStorage.setItem(LS_PROFILE, JSON.stringify(updatedProfile));
         setProfile(updatedProfile);
         setForm(updatedProfile);
-      } else if (savedProfile.loginType === "guest") {
-        setProfile(savedProfile);
-        setForm(savedProfile);
-      } else {
-        localStorage.removeItem(LS_PROFILE);
-        navigate("/auth");
       }
     });
     return () => unsubscribe();
-  }, [navigate]);
+  }, []);
 
-  // Load posts from Firestore
+  // Load posts from Firestore (all reports of current user)
   useEffect(() => {
     if (!currentUserId) return;
-    const q = query(
-      collection(db, "reports"),
-      where("userId", "==", currentUserId),
-      orderBy("createdAt", "desc")
-    );
+ const q = query(
+  collection(db, "reports"),
+  where("userId", "==", currentUserId),
+  orderBy("createdAt") // make sure all docs have this field
+);
+
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const userPosts = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
       setPosts(userPosts);
@@ -113,7 +101,7 @@ export default function Profile() {
     return () => unsubscribe();
   }, [currentUserId]);
 
-  // Load archives from Firestore
+  // Load archives from Firestore (optional)
   useEffect(() => {
     if (!currentUserId) return;
     const q = query(
@@ -135,10 +123,15 @@ export default function Profile() {
 
   const displayName = useMemo(() => {
     if (profile.loginType === "google")
-      return profile.googleName || profile.fullName || "User";
-    if (profile.loginType === "email" || profile.loginType === "create")
-      return profile.fullName || `${profile.firstName || ""} ${profile.lastName || ""}`.trim() || "User";
-    if (profile.loginType === "guest") return profile.guestName || "Guest";
+      return profile.googleName || profile.fullName || profile.displayName || "User";
+    if (profile.loginType === "create" || profile.loginType === "email") {
+      return (
+        profile.fullName ||
+        `${profile.firstName || ""} ${profile.lastName || ""}`.trim() ||
+        "User"
+      );
+    }
+    if (profile.loginType === "guest") return profile.guestName || "User";
     return "User";
   }, [profile]);
 
@@ -167,25 +160,19 @@ export default function Profile() {
     reader.readAsDataURL(file);
   };
 
-  const onSubmit = async (e) => {
+  const onSubmit = (e) => {
     e.preventDefault();
-    setError("");
-
-    // Validate password for email login
-    if (profile.loginType === "email" && form.password) {
+    if (profile.loginType === "email") {
+      if (!form.password) {
+        setError("Password cannot be empty!");
+        return;
+      }
       if (form.password !== confirmPwd) {
         setError("Passwords do not match!");
         return;
       }
-      try {
-        const credential = EmailAuthProvider.credential(profile.email, form.password);
-        await reauthenticateWithCredential(auth.currentUser, credential);
-      } catch (err) {
-        setError("Invalid password. Please try again.");
-        return;
-      }
     }
-
+    setError("");
     const fullName = `${form.firstName || ""} ${form.middleName || ""} ${form.lastName || ""}`.trim();
     const updatedProfile = {
       ...profile,
@@ -196,41 +183,13 @@ export default function Profile() {
       lastName: form.lastName || profile.lastName || "",
       profileImage: form.profileImage || profile.profileImage || "",
       lastLogin: profile.lastLogin || new Date().toLocaleString(),
-      ...(profile.loginType === "email" && form.password ? { password: form.password } : {}),
+      password: form.password || profile.password || "",
     };
 
     try {
-      // Update Firestore for non-guest users
-      if (profile.loginType !== "guest") {
-        await setDoc(
-          doc(db, "users", currentUserId),
-          {
-            fullName: updatedProfile.fullName,
-            firstName: updatedProfile.firstName,
-            middleName: updatedProfile.middleName,
-            lastName: updatedProfile.lastName,
-            profileImage: updatedProfile.profileImage,
-            lastLogin: new Date().toLocaleString(),
-          },
-          { merge: true }
-        );
-      } else {
-        await setDoc(
-          doc(db, "guests", currentUserId),
-          {
-            fullName: updatedProfile.fullName,
-            firstName: updatedProfile.firstName,
-            middleName: updatedProfile.middleName,
-            lastName: updatedProfile.lastName,
-            profileImage: updatedProfile.profileImage,
-            lastLogin: new Date().toLocaleString(),
-          },
-          { merge: true }
-        );
-      }
-
       localStorage.setItem(LS_PROFILE, JSON.stringify(updatedProfile));
       setProfile(updatedProfile);
+
       triggerToast("Profile updated successfully ✅");
       setShowEdit(false);
     } catch (err) {
@@ -251,6 +210,10 @@ export default function Profile() {
     try {
       await setDoc(doc(db, "archives", report.id), { ...report, archivedAt: Date.now() });
       await deleteDoc(doc(db, "reports", report.id));
+
+      setArchives([...archives, { ...report, archivedAt: Date.now() }]);
+      setPosts(posts.filter((p) => p.id !== reportToDelete));
+
       setReportToDelete(null);
       setShowConfirmDeleteReport(false);
       triggerToast("Report deleted ✅");
@@ -260,67 +223,45 @@ export default function Profile() {
     }
   };
 
-  const clearAllArchives = async () => {
-    try {
-      for (const archive of archives) {
-        await deleteDoc(doc(db, "archives", archive.id));
-      }
-      setArchives([]);
-      setShowConfirmClear(false);
-      triggerToast("All archives cleared ✅");
-    } catch (err) {
-      console.error(err);
-      triggerToast("Failed to clear archives ❌");
-    }
-  };
-
-  const onDelete = async () => {
-    setDeleteError("");
-    try {
-      // Reauthenticate based on login type
-      if (profile.loginType === "email" && currentUser) {
-        if (!deletePwd) {
-          setDeleteError("Please enter your password.");
-          return;
-        }
-        const credential = EmailAuthProvider.credential(profile.email, deletePwd);
-        await reauthenticateWithCredential(currentUser, credential);
-      } else if (profile.loginType === "google" && currentUser) {
-        await reauthenticateWithPopup(currentUser, googleProvider);
-      }
-
-      // Delete all user's reports
-      for (const post of posts) {
-        await deleteDoc(doc(db, "reports", post.id));
-      }
-
-      // Delete all archives
-      for (const archive of archives) {
-        await deleteDoc(doc(db, "archives", archive.id));
-      }
-
-      // Delete user data from Firestore
-      if (profile.loginType === "guest") {
-        await deleteDoc(doc(db, "guests", currentUserId));
-      } else {
-        await deleteDoc(doc(db, "users", currentUserId));
-        if (currentUser) {
-          await deleteUser(currentUser);
-        }
-      }
-
-      // Clear local storage
-      localStorage.removeItem(LS_PROFILE);
-
-      triggerToast("Account deleted successfully ✅");
-      navigate("/auth");
-    } catch (err) {
-      console.error(err);
-      setDeleteError("Failed to delete account: " + err.message);
-    }
+  const clearAllArchives = () => {
+    archives.forEach(async (a) => await deleteDoc(doc(db, "archives", a.id)));
+    setArchives([]);
+    setShowConfirmClear(false);
+    triggerToast("All archives cleared ✅");
   };
 
   const formatTimestamp = (timestamp) => (timestamp ? new Date(timestamp).toLocaleString() : "—");
+
+  // Add this inside your Profile component, before return()
+const onDelete = async () => {
+  try {
+    // Delete all user's reports
+    for (const post of posts) {
+      await deleteDoc(doc(db, "reports", post.id));
+    }
+
+    // Delete all archives
+    for (const archive of archives) {
+      await deleteDoc(doc(db, "archives", archive.id));
+    }
+
+    // Delete user from Firebase Auth if email/login type
+    if (profile.loginType === "email" && currentUser) {
+      await currentUser.delete(); // deletes user account in Firebase Auth
+    }
+
+    // Remove local storage
+    localStorage.removeItem(LS_PROFILE);
+
+    triggerToast("Account deleted successfully ✅");
+
+    // Redirect to login
+    navigate("/login");
+  } catch (err) {
+    console.error(err);
+    setDeleteError("Failed to delete account. Re-login and try again.");
+  }
+};
 
   return (
     <div className="min-h-screen bg-[var(--color-secondary)] text-[var(--color-text)]">
@@ -335,6 +276,8 @@ export default function Profile() {
           </Link>
 
           <div className="relative">
+            {/* View Archives button */}
+
             <button
               onClick={() => setDropdownOpen((d) => !d)}
               className="inline-flex items-center gap-2 rounded-xl px-3 py-2 font-semibold bg-[var(--color-primary)] text-white hover:bg-[var(--color-primary-hover)]"
@@ -348,7 +291,7 @@ export default function Profile() {
                   onClick={() => {
                     setShowEdit(true);
                     setForm(profile);
-                    setConfirmPwd("");
+                    setConfirmPwd(profile.password || "");
                     setShowPwd(false);
                     setShowConfirmPwd(false);
                     setDropdownOpen(false);
@@ -423,7 +366,9 @@ export default function Profile() {
                         </h3>
                         <div className="mt-1 text-xs text-black/60 inline-flex items-center gap-1">
                           <FiClock className="opacity-70" />
-                          {formatTimestamp(p.createdAt)}
+                          {p?.createdAt
+                            ? new Date(p.createdAt).toLocaleString()
+                            : "—"}
                         </div>
                         {p.location && (
                           <div className="mt-1 text-sm text-black/70 inline-flex items-center gap-1">
@@ -447,6 +392,7 @@ export default function Profile() {
                           </div>
                         )}
                         <div className="mt-auto flex gap-3 pt-4">
+                          {/* ONLY Delete button (Archive button removed as requested) */}
                           <button
                             onClick={() => deleteReport(p.id)}
                             className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-100 text-red-600 hover:bg-red-200 text-sm"
@@ -494,7 +440,7 @@ export default function Profile() {
         )}
       </AnimatePresence>
 
-      {/* EDIT PROFILE MODAL */}
+      {/* EDIT PROFILE MODAL (unchanged layout; has eye toggles) */}
       <AnimatePresence>
         {showEdit && (
           <motion.div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50">
@@ -537,7 +483,7 @@ export default function Profile() {
                     <input
                       type="text"
                       name="firstName"
-                      value={form.firstName || ""}
+                      value={form.firstName}
                       onChange={onChange}
                       className="w-full rounded-xl bg-[var(--color-secondary)] px-4 py-3 outline-none ring-1 ring-black/10 focus:ring-2 focus:ring-[var(--color-primary)]"
                     />
@@ -549,7 +495,7 @@ export default function Profile() {
                     <input
                       type="text"
                       name="middleName"
-                      value={form.middleName || ""}
+                      value={form.middleName}
                       onChange={onChange}
                       className="w-full rounded-xl bg-[var(--color-secondary)] px-4 py-3 outline-none ring-1 ring-black/10 focus:ring-2 focus:ring-[var(--color-primary)]"
                     />
@@ -561,54 +507,51 @@ export default function Profile() {
                     <input
                       type="text"
                       name="lastName"
-                      value={form.lastName || ""}
+                      value={form.lastName}
                       onChange={onChange}
                       className="w-full rounded-xl bg-[var(--color-secondary)] px-4 py-3 outline-none ring-1 ring-black/10 focus:ring-2 focus:ring-[var(--color-primary)]"
                     />
                   </div>
                 </div>
 
-                {/* Password (only for email login) */}
-                {profile.loginType === "email" && (
-                  <>
-                    <div className="relative">
-                      <label className="block text-sm font-medium">Password</label>
-                      <input
-                        type={showPwd ? "text" : "password"}
-                        name="password"
-                        value={form.password || ""}
-                        onChange={onChange}
-                        className="w-full rounded-xl bg-[var(--color-secondary)] px-4 py-3 pr-12 outline-none ring-1 ring-black/10 focus:ring-2 focus:ring-[var(--color-primary)]"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowPwd((v) => !v)}
-                        className="absolute right-3 top-8 p-1 text-black/60 hover:text-black"
-                      >
-                        {showPwd ? <FiEyeOff /> : <FiEye />}
-                      </button>
-                    </div>
+                {/* Password */}
+                <div className="relative">
+                  <label className="block text-sm font-medium">Password</label>
+                  <input
+                    type={showPwd ? "text" : "password"}
+                    name="password"
+                    value={form.password}
+                    onChange={onChange}
+                    className="w-full rounded-xl bg-[var(--color-secondary)] px-4 py-3 pr-12 outline-none ring-1 ring-black/10 focus:ring-2 focus:ring-[var(--color-primary)]"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPwd((v) => !v)}
+                    className="absolute right-3 top-8 p-1 text-black/60 hover:text-black"
+                  >
+                    {showPwd ? <FiEyeOff /> : <FiEye />}
+                  </button>
+                </div>
 
-                    <div className="relative">
-                      <label className="block text-sm font-medium">
-                        Confirm Password
-                      </label>
-                      <input
-                        type={showConfirmPwd ? "text" : "password"}
-                        value={confirmPwd}
-                        onChange={(e) => setConfirmPwd(e.target.value)}
-                        className="w-full rounded-xl bg-[var(--color-secondary)] px-4 py-3 pr-12 outline-none ring-1 ring-black/10 focus:ring-2 focus:ring-[var(--color-primary)]"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowConfirmPwd((v) => !v)}
-                        className="absolute right-3 top-8 p-1 text-black/60 hover:text-black"
-                      >
-                        {showConfirmPwd ? <FiEyeOff /> : <FiEye />}
-                      </button>
-                    </div>
-                  </>
-                )}
+                {/* Confirm Password */}
+                <div className="relative">
+                  <label className="block text-sm font-medium">
+                    Confirm Password
+                  </label>
+                  <input
+                    type={showConfirmPwd ? "text" : "password"}
+                    value={confirmPwd}
+                    onChange={(e) => setConfirmPwd(e.target.value)}
+                    className="w-full rounded-xl bg-[var(--color-secondary)] px-4 py-3 pr-12 outline-none ring-1 ring-black/10 focus:ring-2 focus:ring-[var(--color-primary)]"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPwd((v) => !v)}
+                    className="absolute right-3 top-8 p-1 text-black/60 hover:text-black"
+                  >
+                    {showConfirmPwd ? <FiEyeOff /> : <FiEye />}
+                  </button>
+                </div>
 
                 {error && <p className="text-sm text-red-600">{error}</p>}
 
@@ -666,39 +609,29 @@ export default function Profile() {
           <motion.div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
             <motion.div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 text-center">
               <h2 className="text-lg font-bold mb-3 text-[var(--color-primary)]">
-                Confirm Account Deletion
+                Confirm Password
               </h2>
-              {profile.loginType === "email" ? (
-                <>
-                  <p className="text-sm text-black/70 mb-4">
-                    Please enter your password to confirm deletion.
-                  </p>
-                  <div className="relative mb-3">
-                    <input
-                      type={showDeletePwd ? "text" : "password"}
-                      value={deletePwd}
-                      onChange={(e) => setDeletePwd(e.target.value)}
-                      className="w-full rounded-xl bg-[var(--color-secondary)] px-4 py-3 pr-12 outline-none ring-1 ring-black/10 focus:ring-2 focus:ring-[var(--color-primary)]"
-                      placeholder="Enter your password"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowDeletePwd((v) => !v)}
-                      className="absolute right-3 top-3 text-black/60 hover:text-black"
-                    >
-                      {showDeletePwd ? <FiEyeOff /> : <FiEye />}
-                    </button>
-                  </div>
-                  {deleteError && (
-                    <p className="text-sm text-red-600 mb-3">{deleteError}</p>
-                  )}
-                </>
-              ) : (
-                <p className="text-sm text-black/70 mb-4">
-                  {profile.loginType === "google"
-                    ? "You will be prompted to re-authenticate with Google to confirm deletion."
-                    : "Confirm to delete your guest account."}
-                </p>
+              <p className="text-sm text-black/70 mb-4">
+                Please enter your password to confirm deletion.
+              </p>
+              <div className="relative mb-3">
+                <input
+                  type={showDeletePwd ? "text" : "password"}
+                  value={deletePwd}
+                  onChange={(e) => setDeletePwd(e.target.value)}
+                  className="w-full rounded-xl bg-[var(--color-secondary)] px-4 py-3 pr-12 outline-none ring-1 ring-black/10 focus:ring-2 focus:ring-[var(--color-primary)]"
+                  placeholder="Enter your password"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowDeletePwd((v) => !v)}
+                  className="absolute right-3 top-3 text-black/60 hover:text-black"
+                >
+                  {showDeletePwd ? <FiEyeOff /> : <FiEye />}
+                </button>
+              </div>
+              {deleteError && (
+                <p className="text-sm text-red-600 mb-3">{deleteError}</p>
               )}
               <div className="flex gap-3 justify-center">
                 <button
@@ -708,7 +641,13 @@ export default function Profile() {
                   Cancel
                 </button>
                 <button
-                  onClick={onDelete}
+                  onClick={() => {
+                    if (deletePwd === profile.password) {
+                      onDelete();
+                    } else {
+                      setDeleteError("Incorrect password!");
+                    }
+                  }}
                   className="px-4 py-2 rounded-xl bg-red-600 text-white hover:bg-red-700"
                 >
                   Confirm Delete
