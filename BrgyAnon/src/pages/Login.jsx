@@ -45,7 +45,7 @@ export default function Login() {
     setNotification("");
 
     if (!email.trim() || !password.trim()) {
-      setNotification("Please enter email/codename and password.");
+      setNotification("Please enter email and password.");
       setNotificationType("warning");
       return;
     }
@@ -100,7 +100,7 @@ export default function Login() {
     } else {
       // ---------------------- LOGIN ----------------------
       if (!email.trim() || !password.trim()) {
-        setNotification("Please enter email/codename and password.");
+        setNotification("Please enter email and password.");
         setNotificationType("warning");
         return;
       }
@@ -196,7 +196,9 @@ export default function Login() {
           setNotification("Login failed: " + err.message);
         }
         setNotificationType("danger");
-      }}};
+      }
+    }
+  };
 
   // ---------------------- GOOGLE LOGIN ----------------------
   const handleGoogleLogin = async () => {
@@ -343,7 +345,7 @@ export default function Login() {
 
       <form onSubmit={handleSubmit}>
         <div className="mb-3">
-          <label>{isSignup ? "Email" : "Email or Admin Codename"}</label>
+          <label>{isSignup ? "Email" : "Email"}</label>
           <input
             type="email"
             className="form-control rounded-pill"
