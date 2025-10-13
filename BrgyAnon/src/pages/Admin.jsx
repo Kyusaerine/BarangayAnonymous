@@ -27,6 +27,32 @@ export const STATUSES = [
   "Rejected",
 ];
 
+const handleRestoreUser = async (user) => {
+  try {
+    // Restore the user in main 'users' collection
+    await setDoc(
+      doc(db, "users", user.userId), // Make sure this matches the user ID field in archive
+      {
+        email: user.email || "",
+        name: user.name || "",
+        userId: user.userId,
+        isActive: true,
+        restoredAt: new Date(),
+      },
+      { merge: true }
+    );
+
+    // Remove user from archive
+    await deleteDoc(doc(db, "archive", user.userId)); // Use the same doc ID as in archive
+
+    alert("✅ User restored successfully!");
+  } catch (err) {
+    console.error("❌ Error restoring user:", err);
+    alert("Failed to restore user.");
+  }
+};
+
+
 const handleArchiveUser = async (user) => {
   try {
     await setDoc(doc(db, "archive", user.id), {

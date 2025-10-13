@@ -139,23 +139,31 @@ const Archive = () => {
 
 
   // 🔹 Restore report
-  const handleRestoreReport = async (report) => {
-    if (report.isProcessing) return;
-    report.isProcessing = true;
-    try {
-      await setDoc(doc(db, "reports", report.id), {
-        ...report,
-        restoredAt: serverTimestamp(),
-      });
-      await deleteDoc(doc(db, "archivedReports", report.id));
-      setArchivedReports((prev) => prev.filter((r) => r.id !== report.id));
-      showNotification("Report restored successfully!");
-    } catch (error) {
-      console.error("Error restoring report:", error);
-    } finally {
-      report.isProcessing = false;
-    }
-  };
+const handleRestoreReport = async (report) => {
+  try {
+    // Restore in main 'users' or 'reports' collection
+    await setDoc(
+      doc(db, "users", report.userId), // or "reports" if restoring a report
+      {
+        email: report.email || "",
+        name: report.name || "",
+        userId: report.userId,
+        isActive: true, // crucial for login
+        restoredAt: new Date(),
+      },
+      { merge: true }
+    );
+
+    // Remove from archive
+    await deleteDoc(doc(db, "archive", report.userId)); // same doc ID as archived
+
+    alert("✅ Restored successfully!");
+  } catch (err) {
+    console.error("❌ Restore failed:", err);
+    alert("Failed to restore.");
+  }
+};
+
 
   const formatTimestamp = (timestamp) => {
     if (!timestamp) return "";
@@ -413,7 +421,7 @@ const Archive = () => {
                                 {formatTimestamp(report.archivedAt)}
                               </td>
                               <td>
-                                <button
+                               <button
                                   className="btn btn-success btn-sm"
                                   disabled={report.isProcessing}
                                   onClick={() => handleRestoreReport(report)}
