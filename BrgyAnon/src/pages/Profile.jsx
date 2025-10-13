@@ -291,7 +291,7 @@ const onDelete = async () => {
                   onClick={() => {
                     setShowEdit(true);
                     setForm(profile);
-                    setConfirmPwd( google.password || email.password || " ");
+                    setConfirmPwd(profile.password || "");
                     setShowPwd(false);
                     setShowConfirmPwd(false);
                     setDropdownOpen(false);
@@ -642,7 +642,7 @@ const onDelete = async () => {
                 </button>
                 <button
                   onClick={() => {
-                    if (deletePwd === email.password || google.password) {
+                    if (deletePwd === profile.password) {
                       onDelete();
                     } else {
                       setDeleteError("Incorrect password!");

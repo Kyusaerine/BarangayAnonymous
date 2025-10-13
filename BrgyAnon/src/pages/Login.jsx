@@ -16,7 +16,6 @@ import {
   getDoc,
   setDoc,
   collection,
-  addDoc,
   query,
   where,
   getDocs,
@@ -27,13 +26,12 @@ export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [notification, setNotification] = useState(""); // ✅ For alert message
-  const [notificationType, setNotificationType] = useState("danger"); // "success" | "danger"
+  const [notification, setNotification] = useState("");
+  const [notificationType, setNotificationType] = useState("danger");
   const [guestNameError, setGuestNameError] = useState("");
   const [resetMessage, setResetMessage] = useState("");
   const navigate = useNavigate();
 
-  // 🕒 Auto-hide alert after 10 seconds
   useEffect(() => {
     if (notification) {
       const timer = setTimeout(() => setNotification(""), 10000);
@@ -41,7 +39,6 @@ export default function Login() {
     }
   }, [notification]);
 
-  // ✅ EMAIL LOGIN
   const handleLogin = async (e) => {
     e.preventDefault();
     setNotification("");
@@ -53,7 +50,7 @@ export default function Login() {
     }
 
     try {
-      // 🔹 Check if user is archived BEFORE authentication
+      // Check if user is archived
       const archivedQuery = query(
         collection(db, "archiveUsers"),
         where("email", "==", email.trim())
@@ -65,16 +62,32 @@ export default function Login() {
           "⚠️ Your account has been deactivated. Please contact the admin."
         );
         setNotificationType("danger");
-        return; // ⛔ stop login
+        return;
       }
 
-      // 🔹 Admin Login
-      const adminSnap = await getDoc(doc(db, "admin", "admin"));
-      if (adminSnap.exists()) {
-        const admin = adminSnap.data();
-        if (email === admin.email && password === admin.password) {
+      // Authenticate user with Firebase
+      const cred = await signInWithEmailAndPassword(auth, email, password);
+      const user = cred.user;
+
+      // Check if user is an admin
+      const userRef = doc(db, "users", user.uid);
+      const userSnap = await getDoc(userRef);
+
+      if (userSnap.exists()) {
+        const userData = userSnap.data();
+        if (userData.isActive === false) {
+          await signOut(auth);
+          setNotification(
+            "⚠️ Your account has been deactivated. Please contact the admin."
+          );
+          setNotificationType("danger");
+          return;
+        }
+
+        // Check admin status
+        if (userData.isAdmin) {
           await setDoc(
-            doc(db, "admin", "admin"),
+            userRef,
             { lastLogin: serverTimestamp() },
             { merge: true }
           );
@@ -82,47 +95,36 @@ export default function Login() {
           navigate("/admin");
           return;
         }
-      }
 
-      // 🔹 Regular user login
-      const cred = await signInWithEmailAndPassword(auth, email, password);
-      const user = cred.user;
-
-      const userRef = doc(db, "users", user.uid);
-      const userSnap = await getDoc(userRef);
-
-      if (userSnap.exists() && userSnap.data().isActive === false) {
-        await signOut(auth);
-        setNotification(
-          "⚠️ Your account has been deactivated. Please contact the admin."
+        // Regular user login
+        await setDoc(
+          userRef,
+          {
+            email: user.email,
+            userId: user.uid,
+            lastLogin: serverTimestamp(),
+            isActive: true,
+          },
+          { merge: true }
         );
+
+        localStorage.setItem(
+          "brgy_profile_data",
+          JSON.stringify({
+            loginType: "email",
+            email: user.email,
+            userId: user.uid,
+            lastLogin: new Date().toLocaleString(),
+          })
+        );
+
+        localStorage.removeItem("brgy_is_admin");
+        navigate("/home");
+      } else {
+        setNotification("User data not found. Please contact support.");
         setNotificationType("danger");
-        return;
+        await signOut(auth);
       }
-
-      await setDoc(
-        userRef,
-        {
-          email: user.email,
-          userId: user.uid,
-          lastLogin: serverTimestamp(),
-          isActive: true,
-        },
-        { merge: true }
-      );
-
-      localStorage.setItem(
-        "brgy_profile_data",
-        JSON.stringify({
-          loginType: "email",
-          email: user.email,
-          userId: user.uid,
-          lastLogin: new Date().toLocaleString(),
-        })
-      );
-
-      localStorage.removeItem("brgy_is_admin");
-      navigate("/home");
     } catch (err) {
       console.error("Login Error:", err);
       setNotification("Login failed: " + err.message);
@@ -130,7 +132,6 @@ export default function Login() {
     }
   };
 
-  // ✅ GOOGLE LOGIN
   const handleGoogleLogin = async () => {
     try {
       const result = await signInWithPopup(auth, googleProvider);
@@ -160,6 +161,18 @@ export default function Login() {
           "⚠️ Your account has been deactivated. Please contact the admin."
         );
         setNotificationType("danger");
+        return;
+      }
+
+      // Check admin status for Google login
+      if (userSnap.exists() && userSnap.data().isAdmin) {
+        await setDoc(
+          userRef,
+          { lastLogin: serverTimestamp() },
+          { merge: true }
+        );
+        localStorage.setItem("brgy_is_admin", "true");
+        navigate("/admin");
         return;
       }
 
@@ -195,7 +208,6 @@ export default function Login() {
     }
   };
 
-  // ✅ GUEST LOGIN
   const handleGuestLogin = async () => {
     if (!fullName.trim()) {
       setGuestNameError("Please enter your full name.");
@@ -221,6 +233,7 @@ export default function Login() {
         })
       );
 
+      localStorage.removeItem("brgy_is_admin");
       navigate("/home");
     } catch (err) {
       console.error(err);
@@ -229,7 +242,6 @@ export default function Login() {
     }
   };
 
-  // ✅ FORGOT PASSWORD
   const handlePasswordReset = async () => {
     try {
       const methods = await fetchSignInMethodsForEmail(auth, email);
@@ -252,7 +264,6 @@ export default function Login() {
         <p className="text-muted mb-3">Login or continue as Guest</p>
       </div>
 
-      {/* ✅ Bootstrap Notification */}
       {notification && (
         <div
           className={`alert alert-${notificationType} alert-dismissible fade show`}
