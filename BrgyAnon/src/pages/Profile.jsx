@@ -127,7 +127,7 @@ export default function Profile() {
     if (profile.loginType === "create" || profile.loginType === "email") {
       return (
         profile.fullName ||
-        `${profile.firstName || ""} ${ profile.middleName || "" } ${profile.lastName || ""}`.trim() ||
+        `${profile.firstName || ""} ${ profile.middleName ||"" } ${profile.lastName || ""}`.trim() ||
         "User"
       );
     }
