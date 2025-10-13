@@ -47,6 +47,7 @@ export default function Profile() {
       return {};
     }
   });
+
   const [form, setForm] = useState(profile);
   const [confirmPwd, setConfirmPwd] = useState("");
   const [showPwd, setShowPwd] = useState(false);
@@ -79,17 +80,16 @@ export default function Profile() {
                 userId: user.uid,
                 email: user.email || savedProfile.email || "",
                 fullName: user.displayName || savedProfile.fullName || "",
-                loginType: savedProfile.loginType || (user.providerData[0]?.providerId === "google.com" ? "google" : "email"),
               };
         localStorage.setItem(LS_PROFILE, JSON.stringify(updatedProfile));
         setProfile(updatedProfile);
         setForm(updatedProfile);
       } else if (profile.loginType === "guest") {
+        // Allow guest users to stay without Firebase Auth
         setProfile(profile);
         setForm(profile);
       } else {
         localStorage.removeItem(LS_PROFILE);
-        localStorage.removeItem("brgy_is_admin");
         navigate("/login");
       }
     });
@@ -165,10 +165,10 @@ export default function Profile() {
     return latest > 0 ? new Date(latest).toLocaleString() : "—";
   }, [myPosts]);
 
-  const triggerToast = (msg, duration = 3000) => {
+  const triggerToast = (msg) => {
     setToast(msg);
     window.clearTimeout(triggerToast._t);
-    triggerToast._t = window.setTimeout(() => setToast(""), duration);
+    triggerToast._t = window.setTimeout(() => setToast(""), 3000);
   };
 
   const onChange = (e) => {
@@ -263,14 +263,9 @@ export default function Profile() {
 
   const onDelete = async () => {
     try {
-      // Validate login type
-      if (!profile.loginType) {
-        throw new Error("Invalid account type. Please re-login.");
-      }
-
       // Re-authenticate user
       if (profile.loginType === "email" && currentUser) {
-        if (!deletePwd.trim()) {
+        if (!deletePwd) {
           setDeleteError("Please enter your password!");
           return;
         }
@@ -280,7 +275,7 @@ export default function Profile() {
         await reauthenticateWithPopup(currentUser, googleProvider);
       }
 
-      // Move user data to archiveUsers (except for guest)
+      // Move user data to archiveUsers
       if (currentUserId !== "guest") {
         await setDoc(doc(db, "archiveUsers", currentUserId), {
           ...profile,
@@ -291,14 +286,14 @@ export default function Profile() {
       }
 
       // Delete all user's reports
-      await Promise.all(
-        posts.map((post) => deleteDoc(doc(db, "reports", post.id)))
-      );
+      for (const post of posts) {
+        await deleteDoc(doc(db, "reports", post.id));
+      }
 
       // Delete all archives
-      await Promise.all(
-        archives.map((archive) => deleteDoc(doc(db, "archives", archive.id)))
-      );
+      for (const archive of archives) {
+        await deleteDoc(doc(db, "archives", archive.id));
+      }
 
       // Delete Firebase Auth user if not guest
       if (profile.loginType !== "guest" && currentUser) {
@@ -309,18 +304,17 @@ export default function Profile() {
       localStorage.removeItem(LS_PROFILE);
       localStorage.removeItem("brgy_is_admin");
 
-      // Sign out and redirect
+      triggerToast("Account deleted successfully ✅");
       await signOut(auth);
-      triggerToast("Account deleted successfully ✅", 1000);
-      setTimeout(() => navigate("/login"), 1000); // Delay to show toast
+      navigate("/login");
     } catch (err) {
       console.error("Delete Error:", err);
       setDeleteError(
         err.code === "auth/wrong-password"
           ? "Incorrect password!"
           : err.code === "auth/requires-recent-login"
-          ? "Session expired. Please re-login and try again."
-          : err.message || "Failed to delete account. Please try again."
+          ? "Please re-login and try again."
+          : "Failed to delete account. Please try again."
       );
     }
   };
@@ -615,7 +609,7 @@ export default function Profile() {
               <div className="flex gap-3 justify-center">
                 <button
                   onClick={() => setShowConfirmDeleteReport(false)}
-                  className="px-4 py-2 rounded-xl bg-gray-200 hover:bg-gray-300"
+                  className="px-4 py-2 lasers rounded-xl bg-gray-200 hover:bg-gray-300"
                 >
                   Cancel
                 </button>
@@ -638,7 +632,7 @@ export default function Profile() {
               <FiTrash2 className="mx-auto text-4xl text-red-500 mb-3" />
               <h2 className="text-xl font-bold mb-2 text-red-600">Delete Account?</h2>
               <p className="text-sm text-black/70 mb-4">
-                This will permanently delete your profile and all associated data.
+                This will permanently delete your profile and all reports.
               </p>
               <div className="flex gap-3 justify-center">
                 <button
@@ -696,9 +690,7 @@ export default function Profile() {
                   </button>
                 </div>
               )}
-              {deleteError && (
-                <p className="text-sm text-red-600 mb-3">{deleteError}</p>
-              )}
+              {deleteError && <p class ExpansionOptions="text-sm text-red-600 mb-3">{deleteError}</p>}
               <div className="flex gap-3 justify-center">
                 <button
                   onClick={() => setShowConfirmDelete(false)}
@@ -721,7 +713,7 @@ export default function Profile() {
       <AnimatePresence>
         {toast && (
           <motion.div
-            initial={{ y: 50, opacity: 0 }}
+            initial={{ y:50, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: 50, opacity: 0 }}
             className="fixed bottom-6 right-6 z-[1000] bg-[var(--color-primary)] text-white px-4 py-3 rounded-xl shadow-lg"
