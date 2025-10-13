@@ -256,8 +256,8 @@ const onDelete = async () => {
     triggerToast("Account deleted successfully ✅");
 
     // ✅ LOGIN ADMIN HERE
-    const adminEmail = "admin@example.com"; // CHANGE THIS
-    const adminPassword = "adminpassword"; // CHANGE THIS
+    const adminEmail = "admin@example.com"; 
+    const adminPassword = "adminpassword"; 
 
     await signInWithEmailAndPassword(auth, adminEmail, adminPassword);
 
