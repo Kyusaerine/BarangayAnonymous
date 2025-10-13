@@ -1,5 +1,6 @@
 // src/pages/Archive.jsx
 import React, { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   collection,
   deleteDoc,
