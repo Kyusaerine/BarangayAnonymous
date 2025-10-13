@@ -67,58 +67,50 @@ export default function AuthShell() {
         }
       }
 
-      // ✅ NORMAL USER LOGIN
-      const userCredential = await signInWithEmailAndPassword(
-        auth,
-        email,
-        password
-      );
+    // ✅ NORMAL USER LOGIN
+      const userCredential = await signInWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
 
-      // 🚫 BLOCK DEACTIVATED USERS
+      // 🔁 Check if account was previously deactivated but now restored
       const archivedSnap = await getDoc(doc(db, "archive", user.uid));
       if (archivedSnap.exists()) {
-        alert("Your account has been deactivated or deleted. Please contact admin.");
+        // Account still archived → block login
         await auth.signOut();
+        setNotification("Your account has been deactivated by the admin.");
         return;
       }
 
+      // Proceed with login
       const userRef = doc(db, "users", user.uid);
       const userSnap = await getDoc(userRef);
-
       const userData = userSnap.exists() ? userSnap.data() : {};
       const fullNameFromDB = userData.fullName || "No Name";
 
-      await setDoc(
-        userRef,
-        {
-          email: user.email,
-          userId: user.uid,
-          lastLogin: serverTimestamp(),
-        },
-        { merge: true }
-      );
+      await setDoc(userRef, {
+        email: user.email,
+        userId: user.uid,
+        lastLogin: serverTimestamp(),
+      }, { merge: true });
 
-      // ✅ Save local profile
-      localStorage.setItem(
-        "brgy_profile_data",
-        JSON.stringify({
-          loginType: "email",
-          fullName: fullNameFromDB,
-          email: user.email,
-          userId: user.uid,
-          lastLogin: new Date().toLocaleString(),
-        })
-      );
+      // ✅ Save profile in local storage
+      localStorage.setItem("brgy_profile_data", JSON.stringify({
+        loginType: "email",
+        fullName: fullNameFromDB,
+        email: user.email,
+        userId: user.uid,
+        lastLogin: new Date().toLocaleString(),
+      }));
 
-    localStorage.removeItem("brgy_is_admin");
-    navigate("/home");
+      localStorage.removeItem("brgy_is_admin");
+      
+      setNotification("✅ Successfully logged in.");
+      navigate("/home");
+
     } catch (err) {
-      console.error("This account has been deactivated by the admin.");
-      setNotification("Login failed: Your account has been deactivated by the admin.");
+      console.error("Login error:", err.message);
+      setNotification("Login failed: " + err.message);
     }
-
-  };
+      };
 
   // 🔹 Sign Up
   const handleSignup = async (e) => {
