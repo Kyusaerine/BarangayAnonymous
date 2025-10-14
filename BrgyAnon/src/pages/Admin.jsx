@@ -12,7 +12,7 @@ import {
   FiLogOut,
 } from "react-icons/fi";
 import { motion, AnimatePresence } from "framer-motion";
-import { setDoc, deleteDoc, doc, updateDoc } from "firebase/firestore";
+import { setDoc, deleteDoc, doc } from "firebase/firestore";
 import { db } from "../firebase"; // 🔑 import Firestore
 
 const LS_POSTS = "brgy_posts";
