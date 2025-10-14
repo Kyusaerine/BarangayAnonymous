@@ -209,30 +209,25 @@ export default function Profile() {
     setShowConfirmDeleteReport(true);
   };
 
-const confirmDeleteReport = async () => {
-  if (!reportToDelete) return;
+  const confirmDeleteReport = async () => {
+    if (!reportToDelete) return;
+    const report = posts.find((p) => p.id === reportToDelete);
+    if (!report) return;
+    try {
+      await setDoc(doc(db, "archives", report.id), { ...report, archivedAt: Date.now() });
+      await deleteDoc(doc(db, "reports", report.id));
 
-  try {
-    // Delete from Firestore (main reports collection)
-    const reportRef = doc(db, "reports", reportToDelete);
-    await deleteDoc(reportRef);
+      setArchives([...archives, { ...report, archivedAt: Date.now() }]);
+      setPosts(posts.filter((p) => p.id !== reportToDelete));
 
-    // Update UI instantly on Profile
-    setReports((prev) => prev.filter((r) => r.id !== reportToDelete));
-
-    // Optional: Also remove from local state if cached in feed (safety)
-    localStorage.removeItem(`report-${reportToDelete}`);
-
-    console.log("✅ Report deleted successfully.");
-
-  } catch (error) {
-    console.error("Error deleting report:", error);
-  } finally {
-    setShowConfirmDeleteReport(false);
-    setReportToDelete(null);
-  }
-};
-
+      setReportToDelete(null);
+      setShowConfirmDeleteReport(false);
+      triggerToast("Report deleted ✅");
+    } catch (err) {
+      console.error(err);
+      triggerToast("Failed to delete report ❌");
+    }
+  };
 
   const clearAllArchives = () => {
     archives.forEach(async (a) => await deleteDoc(doc(db, "archives", a.id)));
@@ -598,7 +593,7 @@ const confirmDeleteReport = async () => {
         )}
       </AnimatePresence>
 
-      {/* CONFIRM DELETE REPORT MODAL */}
+{/* CONFIRM DELETE REPORT MODAL */}
 <AnimatePresence>
   {showConfirmDeleteReport && (
     <motion.div
