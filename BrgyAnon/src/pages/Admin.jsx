@@ -24,8 +24,9 @@ export const STATUSES = [
   "Received",
   "In Progress",
   "Resolved",
-  "Rejected",
+  "Rejected", 
 ];
+
 
 const handleArchiveUser = async (user) => {
   try {
