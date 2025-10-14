@@ -146,25 +146,6 @@ export default function Admin() {
     persist(next);
   };
 
-
-const restoreUser = async (userId) => {
-  try {
-    const userRef = doc(db, "users", userId);
-    await updateDoc(userRef, {
-      archived: false,
-      deactivatedByAdmin: false,
-      isActive: true,
-      restoredAt: new Date(),
-    });
-
-    console.log("✅ User restored successfully!");
-    alert("User account has been restored and can now log in.");
-  } catch (error) {
-    console.error("Error restoring user:", error);
-  }
-};
-
-
  const acceptReport = (id) => {
     setStatus(id, "Received");
     showToast("✅ Report accepted successfully!");

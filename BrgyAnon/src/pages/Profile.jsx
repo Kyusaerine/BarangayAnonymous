@@ -615,6 +615,12 @@ export default function Profile() {
         <p className="text-sm text-black/70 mb-4">
           Are you sure you want to delete this post? This action cannot be undone.
         </p>
+        <input
+             type={showConfirmPwd ? "text" : "password"}
+             value={confirmPwd}
+              onChange={(e) => setConfirmPwd(e.target.value)}
+              className="w-full rounded-xl bg-[var(--color-secondary)] px-4 py-3 pr-12 outline-none ring-1 ring-black/10 focus:ring-2 focus:ring-[var(--color-primary)]"
+        />
         <div className="flex gap-3 justify-center">
           <button
             onClick={() => {
