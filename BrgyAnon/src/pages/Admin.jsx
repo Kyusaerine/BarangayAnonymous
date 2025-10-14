@@ -12,7 +12,7 @@ import {
   FiLogOut,
 } from "react-icons/fi";
 import { motion, AnimatePresence } from "framer-motion";
-import { setDoc, deleteDoc, doc } from "firebase/firestore";
+import { setDoc, deleteDoc, doc, updateDoc } from "firebase/firestore";
 import { db } from "../firebase"; // 🔑 import Firestore
 
 const LS_POSTS = "brgy_posts";
@@ -145,6 +145,25 @@ export default function Admin() {
     );
     persist(next);
   };
+
+
+const restoreUser = async (userId) => {
+  try {
+    const userRef = doc(db, "users", userId);
+    await updateDoc(userRef, {
+      archived: false,
+      deactivatedByAdmin: false,
+      isActive: true,
+      restoredAt: new Date(),
+    });
+
+    console.log("✅ User restored successfully!");
+    alert("User account has been restored and can now log in.");
+  } catch (error) {
+    console.error("Error restoring user:", error);
+  }
+};
+
 
  const acceptReport = (id) => {
     setStatus(id, "Received");

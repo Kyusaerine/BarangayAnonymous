@@ -39,6 +39,38 @@ export default function Login() {
     }
   }, [notification]);
 
+const handleLogin = async (email, password) => {
+  try {
+    // Step 1: Firebase Auth sign-in
+    const userCredential = await signInWithEmailAndPassword(auth, email, password);
+    const user = userCredential.user;
+
+    // Step 2: Check Firestore user record
+    const userRef = doc(db, "users", user.uid);
+    const userSnap = await getDoc(userRef);
+
+    if (userSnap.exists()) {
+      const userData = userSnap.data();
+
+      // 🧩 Step 3: Prevent login if archived
+      if (userData.archived) {
+        alert("Your account is currently deactivated. Please contact admin.");
+        await auth.signOut();
+        return;
+      }
+
+      // ✅ Step 4: Allow login if archived = false
+      console.log("Login successful:", userData.email);
+      navigate("/home");
+    } else {
+      alert("User record not found in database.");
+    }
+  } catch (error) {
+    alert("Invalid email or password");
+    console.error(error);
+  }
+};
+
   // ---------------------- EMAIL / PASSWORD LOGIN / SIGNUP ----------------------
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -154,7 +186,7 @@ export default function Login() {
           setNotification("⚠️ Your account has been deactivated. Please contact the admin.");
           setNotificationType("danger");
           return;
-        }
+        } 
 
         const userRef = doc(db, "users", user.uid);
         const userSnap = await getDoc(userRef);
