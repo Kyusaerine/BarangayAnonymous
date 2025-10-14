@@ -557,7 +557,7 @@ const onDelete = async () => {
 
                 <button
                 type="button" // use "button" to avoid accidental form submission
-                onClick={() => navigate("/login")}
+                onClick={() => navigate("/profile")}
                 className="w-full rounded-xl px-4 py-3 font-semibold bg-[var(--color-primary)] text-white hover:bg-[var(--color-primary-hover)]"
               >
                 Save Changes
