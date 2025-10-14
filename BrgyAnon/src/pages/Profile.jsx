@@ -593,41 +593,50 @@ export default function Profile() {
         )}
       </AnimatePresence>
 
-      {/* DELETE ACCOUNT CONFIRM MODAL */}
-      <AnimatePresence>
-        {showDelete && (
-          <motion.div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-            <motion.div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 text-center">
-              <FiTrash2 className="mx-auto text-4xl text-red-500 mb-3" />
-              <h2 className="text-xl font-bold mb-2 text-red-600">
-                Delete Account?
-              </h2>
-              <p className="text-sm text-black/70 mb-4">
-                This will permanently delete your profile and all reports.
-              </p>
-              <div className="flex gap-3 justify-center">
-                <button
-                  onClick={() => setShowDelete(false)}
-                  className="px-4 py-2 rounded-xl bg-gray-200 hover:bg-gray-300"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={() => {
-                    setShowDelete(false);
-                    setShowConfirmDelete(true);
-                    setDeletePwd("");
-                    setDeleteError("");
-                  }}
-                  className="px-4 py-2 rounded-xl bg-red-600 text-white hover:bg-red-700"
-                >
-                  Yes, Delete
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* CONFIRM DELETE REPORT MODAL */}
+<AnimatePresence>
+  {showConfirmDeleteReport && (
+    <motion.div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+    >
+      <motion.div
+        className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 text-center"
+        initial={{ scale: 0.9, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        exit={{ scale: 0.9, opacity: 0 }}
+      >
+        <FiTrash2 className="mx-auto text-4xl text-red-500 mb-3" />
+        <h2 className="text-xl font-bold mb-2 text-red-600">
+          Delete this Report?
+        </h2>
+        <p className="text-sm text-black/70 mb-4">
+          Are you sure you want to delete this post? This action cannot be undone.
+        </p>
+        <div className="flex gap-3 justify-center">
+          <button
+            onClick={() => {
+              setShowConfirmDeleteReport(false);
+              setReportToDelete(null);
+            }}
+            className="px-4 py-2 rounded-xl bg-gray-200 hover:bg-gray-300"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={confirmDeleteReport}
+            className="px-4 py-2 rounded-xl bg-red-600 text-white hover:bg-red-700"
+          >
+            Yes, Delete
+          </button>
+        </div>
+      </motion.div>
+    </motion.div>
+  )}
+</AnimatePresence>
+
 
       {/* PASSWORD CONFIRM MODAL (updated for different types) */}
       <AnimatePresence>
